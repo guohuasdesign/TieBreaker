@@ -1,0 +1,6 @@
+{
+  "name": "The Tiebreaker",
+  "description": "An interactive, AI-powered decision-making assistant that breaks deadlocks with pros/cons weights, SWOT diagrams, comparative metrics, and customized reasoning archetypes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
