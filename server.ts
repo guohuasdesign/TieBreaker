@@ -1274,4 +1274,8 @@ async function initializeServer() {
   });
 }
 
-initializeServer();
+if (!process.env.VERCEL) {
+  initializeServer();
+}
+
+export default app;
