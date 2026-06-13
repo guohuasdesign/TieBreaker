@@ -23,12 +23,221 @@ import {
 import {
   DecisionAnalysis,
   SavedDecision,
-  DecisionArchetype,
-  ProOrConItem
+  DecisionArchetype
 } from './types';
 import DecisionForm from './components/DecisionForm';
 import SavedDecisions from './components/SavedDecisions';
 import { ARCHETYPES } from './components/ArchetypeSelector';
+
+const safeArray = <T,>(value: unknown): T[] => Array.isArray(value) ? value as T[] : [];
+
+const toDisplayText = (value: unknown, fallback = '') => {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const candidate = record.text || record.title || record.name || record.summary || record.description || record.optionName;
+    if (candidate) return toDisplayText(candidate, fallback);
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+};
+
+const toTextArray = (value: unknown) => safeArray<unknown>(value)
+  .map((item) => toDisplayText(item))
+  .filter(Boolean);
+
+const clampNumber = (value: unknown, min: number, max: number, fallback: number) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(min, Math.min(max, numeric)) : fallback;
+};
+
+const getImpactWeight = (impact: unknown) => {
+  if (impact === 'High') return 1.5;
+  if (impact === 'Low') return 0.6;
+  return 1;
+};
+
+const deriveItemWeight = (item: any, index: number, type: 'pro' | 'con') => {
+  const impact = item?.impact;
+  const category = toDisplayText(item?.category).toLowerCase();
+  let weight = impact === 'High' ? 5 : impact === 'Low' ? 2 : 3;
+
+  if (index >= 2) weight -= 1;
+  if (type === 'con' && /(financial|health|security|legal|time|stress|risk)/.test(category)) weight += 1;
+  if (type === 'pro' && /(financial|growth|health|joy|career|long-term|value)/.test(category)) weight += 1;
+
+  return Math.max(1, Math.min(5, weight));
+};
+
+const shouldDeriveWeights = (items: any[]) => {
+  const weights = items
+    .map((item) => Number(item?.weight))
+    .filter((weight) => Number.isFinite(weight));
+  return weights.length === 0 || new Set(weights).size === 1;
+};
+
+const deriveFallbackRating = (option: any, dimensionIndex: number) => {
+  const base = Number.isFinite(Number(option?.overallScore))
+    ? Math.round(Number(option.overallScore) / 10)
+    : 6;
+  const proPower = safeArray<any>(option?.pros).reduce((total, pro) => total + getImpactWeight(pro?.impact), 0);
+  const conPower = safeArray<any>(option?.cons).reduce((total, con) => total + getImpactWeight(con?.impact), 0);
+  const netSignal = proPower - conPower;
+  const dimensionBias = dimensionIndex === 0
+    ? netSignal * 0.45
+    : dimensionIndex === 1
+      ? -conPower * 0.35
+      : proPower * 0.25;
+
+  return Math.max(1, Math.min(10, Math.round(base + dimensionBias)));
+};
+
+const normalizeDecisionAnalysisForClient = (
+  analysis: Partial<DecisionAnalysis> | any,
+  fallbackTitle: string,
+  fallbackOptions: string[],
+  fallbackArchetype: string
+): DecisionAnalysis => {
+  const options = toTextArray(analysis?.options).length
+    ? toTextArray(analysis.options)
+    : fallbackOptions.map((option) => toDisplayText(option)).filter(Boolean);
+  const safeOptions = options.length ? options : ['Option A', 'Option B'];
+  const fallbackOption = safeOptions[0];
+  const optionAnalyses = safeArray<any>(analysis?.optionAnalyses);
+
+  const normalizedOptionAnalyses = safeOptions.map((optionName, optionIndex) => {
+    const existing = optionAnalyses.find((option) => {
+      const label = toDisplayText(option?.optionName || option?.title || option?.name || option?.id);
+      return label === optionName;
+    }) || optionAnalyses[optionIndex] || {};
+    const rawPros = safeArray<any>(existing.pros).length
+      ? safeArray<any>(existing.pros)
+      : safeArray<any>(existing.swot?.strengths);
+    const rawCons = safeArray<any>(existing.cons).length
+      ? safeArray<any>(existing.cons)
+      : safeArray<any>(existing.swot?.weaknesses);
+    const fallbackPros = rawPros.length ? rawPros : [`${optionName} has enough upside to keep in consideration.`];
+    const fallbackCons = rawCons.length ? rawCons : [`${optionName} still has uncertainty that should be managed.`];
+    const deriveProWeights = shouldDeriveWeights(fallbackPros);
+    const deriveConWeights = shouldDeriveWeights(fallbackCons);
+    const pros = fallbackPros.map((pro, proIndex) => ({
+      id: toDisplayText(pro?.id, `pro${proIndex + 1}`),
+      text: toDisplayText(pro?.text ?? pro, 'Potential upside to consider.'),
+      impact: ['High', 'Medium', 'Low'].includes(pro?.impact) ? pro.impact : 'Medium',
+      weight: deriveProWeights ? deriveItemWeight(pro, proIndex, 'pro') : clampNumber(pro?.weight, 1, 5, 3),
+      category: toDisplayText(pro?.category, 'General'),
+    }));
+    const cons = fallbackCons.map((con, conIndex) => ({
+      id: toDisplayText(con?.id, `con${conIndex + 1}`),
+      text: toDisplayText(con?.text ?? con, 'Potential downside to manage.'),
+      impact: ['High', 'Medium', 'Low'].includes(con?.impact) ? con.impact : 'Medium',
+      weight: deriveConWeights ? deriveItemWeight(con, conIndex, 'con') : clampNumber(con?.weight, 1, 5, 3),
+      category: toDisplayText(con?.category, 'General'),
+    }));
+
+    return {
+      optionName: toDisplayText(existing.optionName || existing.title || existing.name || existing.id, optionName),
+      overallScore: clampNumber(existing.overallScore, 0, 100, 50),
+      motto: toDisplayText(existing.motto, 'Worth a grounded look'),
+      pros,
+      cons,
+    };
+  });
+
+  const verdict = analysis?.verdict || {};
+  const comparisons = safeArray<any>(analysis?.comparisons).slice(0, 3).map((comparison, index) => {
+    const comparisonRatings = safeArray<any>(comparison?.ratings);
+    const numericScores = comparisonRatings
+      .map((rating) => Number(rating?.score))
+      .filter((score) => Number.isFinite(score));
+    const isNeutralPlaceholder = numericScores.length >= safeOptions.length && numericScores.every((score) => score === 5);
+
+    return {
+      dimension: toDisplayText(comparison?.dimension, ['Short-term fit', 'Effort', 'Long-term value'][index] || 'Decision fit'),
+      description: toDisplayText(comparison?.description, 'How this factor changes the decision.'),
+      ratings: safeOptions.map((optionName) => {
+        const optionAnalysis = normalizedOptionAnalyses.find((option) => option.optionName === optionName);
+        const existing = comparisonRatings.find((rating) => rating?.optionName === optionName);
+        return {
+          optionName,
+          score: !isNeutralPlaceholder && Number.isFinite(Number(existing?.score)) ? clampNumber(existing?.score, 1, 10, 5) : deriveFallbackRating(optionAnalysis, index),
+          justification: toDisplayText(
+            existing?.justification,
+            optionAnalysis
+              ? `${optionName} scores this way based on its weighted upside/downside profile.`
+              : 'Needs more evidence before scoring strongly.'
+          ),
+        };
+      }),
+    };
+  });
+
+  while (comparisons.length < 3) {
+    const index = comparisons.length;
+    comparisons.push({
+      dimension: ['Short-term fit', 'Effort', 'Long-term value'][index] || 'Decision fit',
+      description: 'Fallback comparison dimension generated for UI stability.',
+      ratings: safeOptions.map((optionName) => ({
+        optionName,
+        score: deriveFallbackRating(
+          normalizedOptionAnalyses.find((option) => option.optionName === optionName),
+          index
+        ),
+        justification: `${optionName} is scored from its overall signal plus the balance of high-impact pros and cons.`,
+      })),
+    });
+  }
+
+  return {
+    decision: toDisplayText(analysis?.decision, fallbackTitle || 'Untitled decision'),
+    archetype: toDisplayText(analysis?.archetype, fallbackArchetype || 'rationalist'),
+    analysisProvider: analysis?.analysisProvider ? String(analysis.analysisProvider) : undefined,
+    options: safeOptions,
+    personalSituation: analysis?.personalSituation ? toDisplayText(analysis.personalSituation) : undefined,
+    verdict: {
+      chosenOption: safeOptions.includes(verdict?.chosenOption) ? verdict.chosenOption : fallbackOption,
+      confidenceScore: clampNumber(verdict?.confidenceScore, 0, 100, 60),
+      mainArgument: toDisplayText(verdict?.mainArgument, `${fallbackOption} currently has the clearest fit based on the available information.`),
+      whatToWatchOutFor: toDisplayText(verdict?.whatToWatchOutFor, 'Watch for missing evidence before making the final commitment.'),
+      actionableNextSteps: toTextArray(verdict?.actionableNextSteps).length
+        ? toTextArray(verdict.actionableNextSteps).slice(0, 3)
+        : ['Clarify your top constraint.', 'Run a small reality check.', 'Revisit the weights after new evidence.'],
+    },
+    optionAnalyses: normalizedOptionAnalyses,
+    swot: {
+      strengths: toTextArray(analysis?.swot?.strengths),
+      weaknesses: toTextArray(analysis?.swot?.weaknesses),
+      opportunities: toTextArray(analysis?.swot?.opportunities),
+      threats: toTextArray(analysis?.swot?.threats),
+    },
+    comparisons,
+  };
+};
+
+const normalizeSavedDecisionForClient = (decision: Partial<SavedDecision> | any): SavedDecision => {
+  const title = toDisplayText(decision?.title || decision?.analysis?.decision, 'Untitled decision');
+  const options = toTextArray(decision?.options).length
+    ? toTextArray(decision.options)
+    : toTextArray(decision?.analysis?.options);
+  const archetype = toDisplayText(decision?.archetype || decision?.analysis?.archetype, 'rationalist');
+
+  return {
+    id: String(decision?.id || `dec_${Date.now()}`),
+    title,
+    createdAt: String(decision?.createdAt || new Date().toISOString()),
+    options: options.length ? options : ['Option A', 'Option B'],
+    archetype,
+    personalSituation: decision?.personalSituation ? toDisplayText(decision.personalSituation) : undefined,
+    analysis: normalizeDecisionAnalysisForClient(decision?.analysis || {}, title, options, archetype),
+    customWeights: decision?.customWeights && typeof decision.customWeights === 'object' ? decision.customWeights : {},
+    notes: decision?.notes,
+  };
+};
 
 export default function App() {
   const [savedDecisions, setSavedDecisions] = useState<SavedDecision[]>([]);
@@ -70,10 +279,12 @@ export default function App() {
     try {
       const stored = localStorage.getItem('the_tiebreaker_decisions');
       if (stored) {
-        const parsed = JSON.parse(stored) as SavedDecision[];
-        setSavedDecisions(parsed);
-        if (parsed.length > 0) {
-          setActiveDecisionId(parsed[0].id);
+        const parsed = JSON.parse(stored);
+        const normalized = safeArray<SavedDecision>(parsed).map(normalizeSavedDecisionForClient);
+        setSavedDecisions(normalized);
+        localStorage.setItem('the_tiebreaker_decisions', JSON.stringify(normalized));
+        if (normalized.length > 0) {
+          setActiveDecisionId(normalized[0].id);
           setShowCreationForm(false);
         }
       }
@@ -144,7 +355,12 @@ export default function App() {
         throw new Error(errorData.error || `Server responded with status ${response.status}`);
       }
 
-      const analysisResult = (await response.json()) as DecisionAnalysis;
+      const analysisResult = normalizeDecisionAnalysisForClient(
+        await response.json(),
+        decisionText,
+        options,
+        archetype
+      );
 
       const newSaved: SavedDecision = {
         id: `dec_${Date.now()}`,
@@ -165,7 +381,7 @@ export default function App() {
     } catch (err: any) {
       console.error(err);
       setError(
-        err.message || "An unexpected error occurred. Please make sure your GEMINI_API_KEY is configured in Secrets."
+        err.message || "An unexpected error occurred. Please make sure your ANTHROPIC_API_KEY is configured."
       );
     } finally {
       setIsLoading(false);
@@ -197,7 +413,12 @@ export default function App() {
         throw new Error(errorData.error || `Server responded with status ${response.status}`);
       }
 
-      const analysisResult = (await response.json()) as DecisionAnalysis;
+      const analysisResult = normalizeDecisionAnalysisForClient(
+        await response.json(),
+        activeDecision.title,
+        activeDecision.options,
+        newArchetype
+      );
 
       if (draftDecision && activeDecision.id === draftDecision.id) {
         setDraftDecision({
@@ -227,7 +448,7 @@ export default function App() {
     } catch (err: any) {
       console.error(err);
       setError(
-        err.message || "An unexpected error occurred during role transition. Ensure your GEMINI_API_KEY is configured."
+        err.message || "An unexpected error occurred during role transition. Ensure your ANTHROPIC_API_KEY is configured."
       );
     } finally {
       setIsLoading(false);
@@ -321,18 +542,23 @@ export default function App() {
   const getRecalculatedScores = () => {
     if (!activeDecision) return [];
 
-    return activeDecision.analysis.optionAnalyses.map((opt, optIdx) => {
+    return activeDecision.options.map((optionName, optIdx) => {
+      const opt = activeDecision.analysis.optionAnalyses?.[optIdx] || {
+        optionName,
+        pros: [],
+        cons: [],
+      };
       let totalProPower = 0;
       let totalConPower = 0;
 
-      opt.pros.forEach((pro, proIdx) => {
+      (opt.pros || []).forEach((pro, proIdx) => {
         const customWeight = activeDecision.customWeights[`${optIdx}-pro-${proIdx}`];
         const multiplier = customWeight !== undefined ? customWeight : pro.weight;
         const impactValue = pro.impact === 'High' ? 1.5 : pro.impact === 'Medium' ? 1.0 : 0.6;
         totalProPower += multiplier * impactValue;
       });
 
-      opt.cons.forEach((con, conIdx) => {
+      (opt.cons || []).forEach((con, conIdx) => {
         const customWeight = activeDecision.customWeights[`${optIdx}-con-${conIdx}`];
         const multiplier = customWeight !== undefined ? customWeight : con.weight;
         const impactValue = con.impact === 'High' ? 1.5 : con.impact === 'Medium' ? 1.0 : 0.6;
@@ -344,7 +570,7 @@ export default function App() {
       const baseScore = totalRatio > 0 ? (totalProPower / totalRatio) * 100 : 50;
       
       return {
-        optionName: opt.optionName,
+        optionName,
         score: Math.round(baseScore),
         proPower: totalProPower.toFixed(1),
         conPower: totalConPower.toFixed(1)
@@ -361,11 +587,12 @@ export default function App() {
     ? ARCHETYPES.find(a => a.id === activeDecision.archetype)
     : null;
   const selectedOptionScore = recalculatedScores[selectedOptionTab];
+  const selectedOptionName = activeDecision?.options[selectedOptionTab] || selectedOptionScore?.optionName || '';
 
   const weightedRecommendedOption = leadingOptionObj?.optionName || activeDecision?.analysis.verdict.chosenOption || '';
   const weightedConfidence = leadingOptionObj?.score || activeDecision?.analysis.verdict.confidenceScore || 0;
   const isWeightedOverride = !!activeDecision && weightedRecommendedOption !== activeDecision.analysis.verdict.chosenOption;
-  const weightedOptionAnalysis = activeDecision?.analysis.optionAnalyses.find(
+  const weightedOptionAnalysis = activeDecision?.analysis.optionAnalyses?.find(
     (option) => option.optionName === weightedRecommendedOption
   );
   const weightedArgument = isWeightedOverride
@@ -385,8 +612,8 @@ export default function App() {
   const confidence = weightedConfidence;
   const verdictTone = confidence >= 75 ? 'Strong signal' : confidence >= 55 ? 'Leaning signal' : 'Close call';
   const topComparisonWins = activeDecision
-    ? activeDecision.analysis.comparisons.reduce<Record<string, number>>((acc, comp) => {
-        const sorted = [...comp.ratings].sort((a, b) => b.score - a.score);
+    ? (activeDecision.analysis.comparisons || []).reduce<Record<string, number>>((acc, comp) => {
+        const sorted = [...(comp.ratings || [])].sort((a, b) => b.score - a.score);
         if (sorted[0] && sorted[1] && sorted[0].score > sorted[1].score) {
           acc[sorted[0].optionName] = (acc[sorted[0].optionName] || 0) + 1;
         }
@@ -544,7 +771,7 @@ export default function App() {
               <h4 className="text-xs font-bold text-rose-800 font-display">Analysis Engine Interrupted</h4>
               <p className="text-xs text-rose-700 font-sans leading-relaxed">{error}</p>
               <p className="text-[11px] text-zinc-500 mt-2">
-                Tip: Ensure you have added your <code className="font-mono bg-rose-100/50 px-1 py-0.5 rounded text-rose-800">GEMINI_API_KEY</code> in the Secrets menu.
+                Tip: Ensure you have added your <code className="font-mono bg-rose-100/50 px-1 py-0.5 rounded text-rose-800">ANTHROPIC_API_KEY</code> in <code className="font-mono bg-rose-100/50 px-1 py-0.5 rounded text-rose-800">.env.local</code>.
               </p>
             </div>
           </div>
@@ -778,6 +1005,11 @@ export default function App() {
                       <span className="text-sm text-zinc-400">
                         {isWeightedOverride ? 'Updated by your weight tuning' : `Recommended by ${currentArchetypeConfig?.name}`}
                       </span>
+                      {activeDecision.analysis.analysisProvider && (
+                        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold text-zinc-300">
+                          Engine: {activeDecision.analysis.analysisProvider}
+                        </span>
+                      )}
                     </div>
 
                     <div className="space-y-3">
@@ -804,7 +1036,7 @@ export default function App() {
                         <p className="text-xs uppercase tracking-widest text-zinc-500 font-bold">Criteria won</p>
                         <p className="mt-1 text-3xl font-black text-sky-300">
                           {topComparisonWins[weightedRecommendedOption] || 0}
-                          <span className="text-base text-zinc-500">/{activeDecision.analysis.comparisons.length}</span>
+                          <span className="text-base text-zinc-500">/{activeDecision.analysis.comparisons?.length || 0}</span>
                         </p>
                       </div>
                       <div className="rounded-2xl bg-white/8 border border-white/10 p-4">
@@ -911,8 +1143,8 @@ export default function App() {
                         </div>
                         <div className="min-w-0 self-center">
                           <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 font-mono">Selected lens</p>
-                          <p className="text-sm font-black text-zinc-900 truncate" title={selectedOptionScore.optionName}>
-                            {selectedOptionScore.optionName}
+                          <p className="text-sm font-black text-zinc-900 truncate" title={selectedOptionName}>
+                            {selectedOptionName}
                           </p>
                           <div className="mt-2 grid grid-cols-2 gap-2">
                             <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-2 py-1">
@@ -935,7 +1167,7 @@ export default function App() {
                           <span className="text-[11px] font-bold text-emerald-700 uppercase tracking-widest font-display">Pros Weight Factor</span>
                           <span className="text-[10px] text-zinc-400 font-mono">Set priority</span>
                         </div>
-                        {activeDecision.analysis.optionAnalyses[selectedOptionTab]?.pros.map((pro, proIdx) => {
+                        {(activeDecision.analysis.optionAnalyses[selectedOptionTab]?.pros || []).map((pro, proIdx) => {
                           const key = `${selectedOptionTab}-pro-${proIdx}`;
                           const currentVal = activeDecision.customWeights[key] !== undefined 
                             ? activeDecision.customWeights[key] 
@@ -961,13 +1193,18 @@ export default function App() {
                             </div>
                           );
                         })}
+                        {(activeDecision.analysis.optionAnalyses[selectedOptionTab]?.pros || []).length === 0 && (
+                          <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3 text-xs font-medium text-emerald-900">
+                            No pros returned for this option yet. Regenerate the analysis to create tunable factors.
+                          </div>
+                        )}
                       </div>
 
                       <div className="space-y-2.5 pt-2 border-t border-zinc-100">
                         <div className="flex items-center justify-between">
                           <span className="text-[11px] font-bold text-rose-700 uppercase tracking-widest font-display">Cons Weight Factor</span>
                         </div>
-                        {activeDecision.analysis.optionAnalyses[selectedOptionTab]?.cons.map((con, conIdx) => {
+                        {(activeDecision.analysis.optionAnalyses[selectedOptionTab]?.cons || []).map((con, conIdx) => {
                           const key = `${selectedOptionTab}-con-${conIdx}`;
                           const currentVal = activeDecision.customWeights[key] !== undefined 
                             ? activeDecision.customWeights[key] 
@@ -993,6 +1230,11 @@ export default function App() {
                             </div>
                           );
                         })}
+                        {(activeDecision.analysis.optionAnalyses[selectedOptionTab]?.cons || []).length === 0 && (
+                          <div className="rounded-xl border border-rose-100 bg-rose-50/60 p-3 text-xs font-medium text-rose-900">
+                            No cons returned for this option yet. Regenerate the analysis to create tunable factors.
+                          </div>
+                        )}
                       </div>
                     </div>
                 </div>
@@ -1023,7 +1265,7 @@ export default function App() {
                       </p>
                       {isWeightedOverride && (
                         <div className="inline-flex rounded-full bg-amber-400/10 border border-amber-300/20 px-3 py-1 text-xs font-bold text-amber-200">
-                          Original Gemini verdict: {activeDecision.analysis.verdict.chosenOption}
+                          Original AI verdict: {activeDecision.analysis.verdict.chosenOption}
                         </div>
                       )}
                     </div>
@@ -1073,7 +1315,7 @@ export default function App() {
                       <div>
                         <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-500">Decision visual</p>
                         <p className="mt-1 text-sm font-semibold text-zinc-200">
-                          Generate from the current recommendation and weight balance
+                          Generate from the current recommendation
                         </p>
                         {decisionIllustration.source && (
                           <p className="mt-1 text-[11px] text-zinc-500">
@@ -1190,7 +1432,7 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-zinc-50">
-                          {activeDecision.analysis.comparisons.map((comp, idx) => {
+                          {(activeDecision.analysis.comparisons || []).map((comp, idx) => {
                             // Find option of max score
                             const sortedRatings = [...comp.ratings].sort((a,b) => b.score - a.score);
                             const topRatedName = sortedRatings[0].score > sortedRatings[1]?.score ? sortedRatings[0].optionName : 'Tie';
@@ -1201,7 +1443,7 @@ export default function App() {
                                   <div className="font-bold text-zinc-800" title={comp.dimension}>{comp.dimension}</div>
                                   <div className="text-xs text-zinc-500 line-clamp-2 max-w-[220px]" title={comp.description}>{comp.description}</div>
                                 </td>
-                                {comp.ratings.map((rt, rIdx) => (
+                                {(comp.ratings || []).map((rt, rIdx) => (
                                   <td key={rIdx} className="py-2.5 text-center px-1">
                                     <span className="inline-block px-2 py-1 rounded-lg font-bold font-mono text-xs bg-zinc-100 text-zinc-800">
                                       {rt.score}/10
@@ -1260,7 +1502,7 @@ export default function App() {
                   <div className="bg-teal-50/60 border border-teal-100 rounded-2xl p-4">
                     <span className="text-xs font-bold text-teal-800 uppercase tracking-wider font-mono">Strengths</span>
                     <div className="mt-2 space-y-2">
-                      {activeDecision.analysis.swot.strengths.slice(0, 2).map((item, i) => (
+                      {(activeDecision.analysis.swot?.strengths || []).slice(0, 2).map((item, i) => (
                         <p key={i} className="text-sm text-teal-950 font-medium leading-relaxed">• {item}</p>
                       ))}
                     </div>
@@ -1269,7 +1511,7 @@ export default function App() {
                   <div className="bg-rose-50/60 border border-rose-100 rounded-2xl p-4">
                     <span className="text-xs font-bold text-rose-800 uppercase tracking-wider font-mono">Weaknesses</span>
                     <div className="mt-2 space-y-2">
-                      {activeDecision.analysis.swot.weaknesses.slice(0, 2).map((item, i) => (
+                      {(activeDecision.analysis.swot?.weaknesses || []).slice(0, 2).map((item, i) => (
                         <p key={i} className="text-sm text-rose-950 font-medium leading-relaxed">• {item}</p>
                       ))}
                     </div>
@@ -1278,7 +1520,7 @@ export default function App() {
                   <div className="bg-sky-50/60 border border-sky-100 rounded-2xl p-4">
                     <span className="text-xs font-bold text-sky-800 uppercase tracking-wider font-mono">Opportunities</span>
                     <div className="mt-2 space-y-2">
-                      {activeDecision.analysis.swot.opportunities.slice(0, 2).map((item, i) => (
+                      {(activeDecision.analysis.swot?.opportunities || []).slice(0, 2).map((item, i) => (
                         <p key={i} className="text-sm text-sky-950 font-medium leading-relaxed">• {item}</p>
                       ))}
                     </div>
@@ -1287,7 +1529,7 @@ export default function App() {
                   <div className="bg-amber-50/60 border border-amber-100 rounded-2xl p-4">
                     <span className="text-xs font-bold text-amber-800 uppercase tracking-wider font-mono">Threats</span>
                     <div className="mt-2 space-y-2">
-                      {activeDecision.analysis.swot.threats.slice(0, 2).map((item, i) => (
+                      {(activeDecision.analysis.swot?.threats || []).slice(0, 2).map((item, i) => (
                         <p key={i} className="text-sm text-amber-950 font-medium leading-relaxed">• {item}</p>
                       ))}
                     </div>

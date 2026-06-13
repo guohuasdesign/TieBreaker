@@ -203,6 +203,288 @@ async function generateContentWithFallback(ai: any, contents: string, config: an
   throw lastError || new Error("All active inference endpoints and retry fallbacks failed.");
 }
 
+const parseJsonObjectFromText = (text: string) => {
+  const trimmed = text.trim();
+  const unfenced = trimmed
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  try {
+    return JSON.parse(unfenced);
+  } catch {
+    const firstBrace = unfenced.indexOf("{");
+    const lastBrace = unfenced.lastIndexOf("}");
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      return JSON.parse(unfenced.slice(firstBrace, lastBrace + 1));
+    }
+    throw new Error("Model returned text that could not be parsed as JSON.");
+  }
+};
+
+const generateClaudeDecisionAnalysis = async (userPrompt: string) => {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error("ANTHROPIC_API_KEY is not configured.");
+  }
+
+  const model = process.env.CLAUDE_DECISION_MODEL || "claude-sonnet-4-6";
+  console.log(`Executing Tiebreaker analysis on Claude model ${model}`);
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": process.env.ANTHROPIC_VERSION || "2023-06-01",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: Number(process.env.CLAUDE_MAX_TOKENS || 6000),
+      temperature: 0.7,
+      system: "You are the analysis engine for a decision-making app. Return only one valid JSON object. Do not include markdown, commentary, code fences, or explanatory prose outside the JSON.",
+      messages: [
+        {
+          role: "user",
+          content: userPrompt,
+        },
+      ],
+    }),
+  });
+
+  const json: any = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(json.error?.message || json.message || `Claude decision analysis failed: ${response.status}`);
+  }
+
+  const textOutput = json.content
+    ?.filter((block: any) => block.type === "text")
+    .map((block: any) => block.text)
+    .join("\n")
+    .trim();
+
+  if (!textOutput) {
+    throw new Error("Received empty response from Claude model.");
+  }
+
+  return parseJsonObjectFromText(textOutput);
+};
+
+const generateGeminiDecisionAnalysis = async (userPrompt: string) => {
+  const ai = getGeminiClient();
+
+  const response = await generateContentWithFallback(ai, userPrompt, {
+    responseMimeType: "application/json",
+    responseSchema: DECISION_RESPONSE_SCHEMA,
+    temperature: 0.7,
+  });
+
+  const textOutput = response.text;
+  if (!textOutput) {
+    throw new Error("Received empty response from Gemini model.");
+  }
+
+  return JSON.parse(textOutput.trim());
+};
+
+const toDisplayText = (value: unknown, fallback = "") => {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const candidate = record.text || record.title || record.name || record.summary || record.description || record.optionName;
+    if (candidate) return toDisplayText(candidate, fallback);
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+};
+
+const toTextArray = (value: unknown) => Array.isArray(value)
+  ? value.map((item) => toDisplayText(item)).filter(Boolean)
+  : [];
+
+const getImpactWeight = (impact: unknown) => {
+  if (impact === "High") return 1.5;
+  if (impact === "Low") return 0.6;
+  return 1;
+};
+
+const deriveItemWeight = (item: any, index: number, type: "pro" | "con") => {
+  const impact = item?.impact;
+  const category = toDisplayText(item?.category).toLowerCase();
+  let weight = impact === "High" ? 5 : impact === "Low" ? 2 : 3;
+
+  if (index >= 2) weight -= 1;
+  if (type === "con" && /(financial|health|security|legal|time|stress|risk)/.test(category)) weight += 1;
+  if (type === "pro" && /(financial|growth|health|joy|career|long-term|value)/.test(category)) weight += 1;
+
+  return Math.max(1, Math.min(5, weight));
+};
+
+const shouldDeriveWeights = (items: any[]) => {
+  const weights = items
+    .map((item) => Number(item?.weight))
+    .filter((weight) => Number.isFinite(weight));
+  return weights.length === 0 || new Set(weights).size === 1;
+};
+
+const deriveFallbackRating = (option: any, dimensionIndex: number) => {
+  const base = Number.isFinite(Number(option?.overallScore))
+    ? Math.round(Number(option.overallScore) / 10)
+    : 6;
+  const proPower = Array.isArray(option?.pros)
+    ? option.pros.reduce((total: number, pro: any) => total + getImpactWeight(pro?.impact), 0)
+    : 0;
+  const conPower = Array.isArray(option?.cons)
+    ? option.cons.reduce((total: number, con: any) => total + getImpactWeight(con?.impact), 0)
+    : 0;
+  const netSignal = proPower - conPower;
+  const dimensionBias = dimensionIndex === 0
+    ? netSignal * 0.45
+    : dimensionIndex === 1
+      ? -conPower * 0.35
+      : proPower * 0.25;
+
+  return Math.max(1, Math.min(10, Math.round(base + dimensionBias)));
+};
+
+const normalizeDecisionAnalysis = ({
+  parsedJson,
+  decision,
+  normalizedOptions,
+  archetype,
+  analysisProvider,
+}: {
+  parsedJson: any;
+  decision: string;
+  normalizedOptions: string[];
+  archetype: string;
+  analysisProvider: string;
+}) => {
+  const safeOptions = normalizedOptions.map((option) => toDisplayText(option)).filter(Boolean);
+  const fallbackOption = safeOptions[0] || "Option A";
+  const safeVerdict = parsedJson?.verdict && typeof parsedJson.verdict === "object" ? parsedJson.verdict : {};
+  const optionAnalyses = Array.isArray(parsedJson?.optionAnalyses) ? parsedJson.optionAnalyses : [];
+  const normalizedOptionAnalyses = safeOptions.map((optionName, index) => {
+    const existing = optionAnalyses.find((option: any) => {
+      const label = toDisplayText(option?.optionName || option?.title || option?.name || option?.id);
+      return label === optionName;
+    }) || optionAnalyses[index] || {};
+    const rawPros = Array.isArray(existing.pros)
+      ? existing.pros
+      : Array.isArray(existing.swot?.strengths)
+        ? existing.swot.strengths
+        : [];
+    const rawCons = Array.isArray(existing.cons)
+      ? existing.cons
+      : Array.isArray(existing.swot?.weaknesses)
+        ? existing.swot.weaknesses
+        : [];
+    const pros = rawPros.length ? rawPros : [`${optionName} has enough upside to keep in consideration.`];
+    const cons = rawCons.length ? rawCons : [`${optionName} still has uncertainty that should be managed.`];
+    const deriveProWeights = shouldDeriveWeights(pros);
+    const deriveConWeights = shouldDeriveWeights(cons);
+
+    return {
+      optionName: toDisplayText(existing.optionName || existing.title || existing.name || existing.id, optionName),
+      overallScore: Number.isFinite(Number(existing.overallScore)) ? Number(existing.overallScore) : 50,
+      motto: toDisplayText(existing.motto, "Worth a grounded look"),
+      pros: pros.map((pro: any, proIndex: number) => ({
+        id: toDisplayText(pro?.id, `pro${proIndex + 1}`),
+        text: toDisplayText(pro?.text ?? pro, "Potential upside to consider."),
+        impact: ["High", "Medium", "Low"].includes(pro?.impact) ? pro.impact : "Medium",
+        weight: deriveProWeights
+          ? deriveItemWeight(pro, proIndex, "pro")
+          : Number.isFinite(Number(pro?.weight)) ? Math.max(1, Math.min(5, Number(pro.weight))) : deriveItemWeight(pro, proIndex, "pro"),
+        category: toDisplayText(pro?.category, "General"),
+      })),
+      cons: cons.map((con: any, conIndex: number) => ({
+        id: toDisplayText(con?.id, `con${conIndex + 1}`),
+        text: toDisplayText(con?.text ?? con, "Potential downside to manage."),
+        impact: ["High", "Medium", "Low"].includes(con?.impact) ? con.impact : "Medium",
+        weight: deriveConWeights
+          ? deriveItemWeight(con, conIndex, "con")
+          : Number.isFinite(Number(con?.weight)) ? Math.max(1, Math.min(5, Number(con.weight))) : deriveItemWeight(con, conIndex, "con"),
+        category: toDisplayText(con?.category, "General"),
+      })),
+    };
+  });
+
+  const comparisons = Array.isArray(parsedJson?.comparisons) ? parsedJson.comparisons : [];
+  const normalizedComparisons = comparisons.slice(0, 3).map((comparison: any, index: number) => {
+    const comparisonRatings = Array.isArray(comparison?.ratings) ? comparison.ratings : [];
+    const numericScores = comparisonRatings
+      .map((rating: any) => Number(rating?.score))
+      .filter((score: number) => Number.isFinite(score));
+    const isNeutralPlaceholder = numericScores.length >= safeOptions.length && numericScores.every((score: number) => score === 5);
+
+    return {
+      dimension: toDisplayText(comparison?.dimension, ["Short-term fit", "Effort", "Long-term value"][index] || "Decision fit"),
+      description: toDisplayText(comparison?.description, "How this factor changes the decision."),
+      ratings: safeOptions.map((optionName) => {
+        const optionAnalysis = normalizedOptionAnalyses.find((option) => option.optionName === optionName);
+        const existing = comparisonRatings.find((rating: any) => rating?.optionName === optionName);
+        return {
+          optionName,
+          score: !isNeutralPlaceholder && Number.isFinite(Number(existing?.score)) ? Math.max(1, Math.min(10, Number(existing.score))) : deriveFallbackRating(optionAnalysis, index),
+          justification: toDisplayText(
+            existing?.justification,
+            optionAnalysis
+              ? `${optionName} scores this way based on its weighted upside/downside profile.`
+              : "Needs more evidence before scoring strongly."
+          ),
+        };
+      }),
+    };
+  });
+
+  while (normalizedComparisons.length < 3) {
+    const index = normalizedComparisons.length;
+    normalizedComparisons.push({
+      dimension: ["Short-term fit", "Effort", "Long-term value"][index] || "Decision fit",
+      description: "Derived from the option's overall score and weighted pros/cons.",
+      ratings: safeOptions.map((optionName) => ({
+        optionName,
+        score: deriveFallbackRating(
+          normalizedOptionAnalyses.find((option) => option.optionName === optionName),
+          index
+        ),
+        justification: `${optionName} is scored from its overall signal plus the balance of high-impact pros and cons.`,
+      })),
+    });
+  }
+
+  const safeSwot = parsedJson?.swot && typeof parsedJson.swot === "object" ? parsedJson.swot : {};
+
+  return {
+    decision: toDisplayText(parsedJson?.decision, decision),
+    archetype: toDisplayText(parsedJson?.archetype, archetype),
+    options: toTextArray(parsedJson?.options).length ? toTextArray(parsedJson.options) : safeOptions,
+    verdict: {
+      chosenOption: safeOptions.includes(safeVerdict.chosenOption) ? safeVerdict.chosenOption : fallbackOption,
+      confidenceScore: Number.isFinite(Number(safeVerdict.confidenceScore)) ? Math.max(0, Math.min(100, Number(safeVerdict.confidenceScore))) : 60,
+      mainArgument: toDisplayText(safeVerdict.mainArgument, `${fallbackOption} currently has the clearest fit based on the available information.`),
+      whatToWatchOutFor: toDisplayText(safeVerdict.whatToWatchOutFor, "Watch for missing evidence before making the final commitment."),
+      actionableNextSteps: toTextArray(safeVerdict.actionableNextSteps).length
+        ? toTextArray(safeVerdict.actionableNextSteps).slice(0, 3)
+        : ["Clarify your top constraint.", "Run a small reality check.", "Revisit the weights after new evidence."],
+    },
+    optionAnalyses: normalizedOptionAnalyses,
+    swot: {
+      strengths: toTextArray(safeSwot.strengths),
+      weaknesses: toTextArray(safeSwot.weaknesses),
+      opportunities: toTextArray(safeSwot.opportunities),
+      threats: toTextArray(safeSwot.threats),
+    },
+    comparisons: normalizedComparisons,
+    analysisProvider,
+  };
+};
+
 const escapeSvgText = (value: unknown) => {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -632,7 +914,7 @@ app.post("/api/analyze-decision", async (req, res) => {
 
     const profile = ARCHETYPE_PROFILES[archetype as keyof typeof ARCHETYPE_PROFILES] || ARCHETYPE_PROFILES.rationalist;
 
-    // Build the prompt for Gemini
+    // Build the prompt for the decision model
     const userPrompt = `
       Please perform a highly objective, rigorous decision comparison for the following decision query:
       Decision Prompt: "${decision}"
@@ -651,29 +933,81 @@ app.post("/api/analyze-decision", async (req, res) => {
       You must strictly adhere to the provided JSON Schema. Do not return any other text besides the valid JSON.
       Include 3-5 vivid and custom pros and cons for each option. Map out the SWOT items and provide exactly 3 comparisons dimensions (e.g., Short-term Happiness, Effort/Friction, Long-term Growth) with rated metrics.
       Ensure the chosen option is EXACTLY one of the options listed: ${JSON.stringify(normalizedOptions)} (do not rewrite or alter the text of the chosen option in the verdict).
+
+      IMPORTANT SCORING RULES:
+      - Do not use neutral placeholder scores like 5/10 unless the option is genuinely neutral on that dimension.
+      - The ratings must express a real recommendation signal. At least one option should clearly lead on each comparison dimension.
+      - Use the full 1-10 range where warranted: 8-10 for strong fit, 6-7 for moderate fit, 3-4 for weak fit, 1-2 for poor fit.
+      - If two options are close, still show the slight difference, e.g. 7 vs 6, and explain why.
+      - The verdict confidenceScore and each option overallScore must align with the comparison ratings.
+      - Each rating justification must be concrete and refer to the user's stated situation.
+      - For every pro and con, set weight from 1 to 5 based on importance to THIS user, not generic importance.
+      - Do not assign the same weight to every factor. Use 5 only for decisive factors, 4 for important factors, 3 for moderate factors, 1-2 for minor factors.
+      - High impact usually maps to weight 4-5, Medium to 3-4, Low to 1-2, but adjust for the user's personal situation.
+
+      Required JSON shape:
+      {
+        "decision": string,
+        "archetype": string,
+        "options": string[],
+        "verdict": {
+          "chosenOption": string,
+          "confidenceScore": number,
+          "mainArgument": string,
+          "whatToWatchOutFor": string,
+          "actionableNextSteps": string[]
+        },
+        "optionAnalyses": [
+          {
+            "optionName": string,
+            "overallScore": number,
+            "motto": string,
+            "pros": [{"id": string, "text": string, "impact": "High"|"Medium"|"Low", "weight": number, "category": string}],
+            "cons": [{"id": string, "text": string, "impact": "High"|"Medium"|"Low", "weight": number, "category": string}]
+          }
+        ],
+        "swot": {"strengths": string[], "weaknesses": string[], "opportunities": string[], "threats": string[]},
+        "comparisons": [
+          {
+            "dimension": string,
+            "description": string,
+            "ratings": [{"optionName": string, "score": number, "justification": string}]
+          }
+        ]
+      }
     `;
 
-    // Retrieve client
-    const ai = getGeminiClient();
-
-    const response = await generateContentWithFallback(ai, userPrompt, {
-      responseMimeType: "application/json",
-      responseSchema: DECISION_RESPONSE_SCHEMA,
-      temperature: 0.7,
-    });
-
-    const textOutput = response.text;
-    if (!textOutput) {
-      throw new Error("Received empty response from Gemini model.");
+    let parsedJson: any;
+    let analysisProvider = "gemini";
+    if (process.env.ANTHROPIC_API_KEY) {
+      try {
+        parsedJson = await generateClaudeDecisionAnalysis(userPrompt);
+        analysisProvider = process.env.CLAUDE_DECISION_MODEL || "claude";
+      } catch (err: any) {
+        console.warn(`Claude decision analysis failed: ${err.message || err}`);
+        if (process.env.ENABLE_GEMINI_FALLBACK !== "true" || !process.env.GEMINI_API_KEY) {
+          throw err;
+        }
+        parsedJson = await generateGeminiDecisionAnalysis(userPrompt);
+        analysisProvider = "gemini-fallback";
+      }
+    } else {
+      parsedJson = await generateGeminiDecisionAnalysis(userPrompt);
     }
 
-    const parsedJson = JSON.parse(textOutput.trim());
-    res.json(parsedJson);
+    const normalizedAnalysis = normalizeDecisionAnalysis({
+      parsedJson,
+      decision,
+      normalizedOptions,
+      archetype,
+      analysisProvider,
+    });
+    res.json(normalizedAnalysis);
 
   } catch (error: any) {
-    console.error("Gemini decision-making analysis error:", error);
+    console.error("Decision-making analysis error:", error);
     res.status(500).json({ 
-      error: error.message || "An error occurred while generating your decision breakdown. Check that your GEMINI_API_KEY is configured." 
+      error: error.message || "An error occurred while generating your decision breakdown. Check that your ANTHROPIC_API_KEY or GEMINI_API_KEY is configured." 
     });
   }
 });
@@ -696,28 +1030,26 @@ app.post("/api/generate-decision-image", async (req, res) => {
       return;
     }
 
-    const scoreSummary = Array.isArray(scores)
-      ? scores.map((score: any) => `${score.optionName}: ${score.score}% appeal`).join(", ")
-      : "No score summary provided.";
+    const recommendedOption = leadingOption || chosenOption;
 
     const prompt = `
       Create a polished editorial decision illustration for a modern AI decision-making app.
+      The image must communicate ONE clear recommendation, not a comparison.
 
       Decision: "${decision}"
-      Current recommended option from adjusted weights: "${leadingOption || chosenOption}"
-      Original AI verdict option: "${chosenOption}"
+      Recommended option to visualize: "${recommendedOption}"
       Confidence: ${confidenceScore ?? "unknown"}%
-      Score balance: ${scoreSummary}
       Reasoning: ${mainArgument || "No reasoning provided."}
       Main caution: ${whatToWatchOutFor || "No caution provided."}
       Personal context: ${personalSituation || "No personal context provided."}
 
       Visual direction:
-      - Show a clear symbolic scene about choosing a path, not a literal UI screenshot.
-      - Make the recommended path visually brighter, calmer, and more inviting.
-      - Keep the competing path visible but less dominant.
+      - Show only the recommended outcome as the central subject.
+      - Do not show two paths, two doors, split screens, scales, versus layouts, or ambiguous alternatives.
+      - Make the scene feel like the user has already chosen "${recommendedOption}" and is moving forward with clarity.
+      - Use one confident focal point, warm directional light, and a calm sense of progress.
       - Use premium product illustration style: cinematic lighting, clean composition, soft depth, modern colors.
-      - No readable text, no logos, no watermarks, no charts, no interface mockups.
+      - No readable text, no logos, no watermarks, no charts, no interface mockups, no comparison symbols.
       - Aspect ratio should feel like a wide card image for a dashboard.
     `;
 

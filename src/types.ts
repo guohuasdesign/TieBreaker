@@ -46,6 +46,7 @@ export interface DecisionVerdict {
 export interface DecisionAnalysis {
   decision: string;
   archetype: string;
+  analysisProvider?: string;
   options: string[];
   personalSituation?: string;
   verdict: DecisionVerdict;
