@@ -35,3 +35,45 @@ html, body, #root {
   background-image: radial-gradient(#e2e8f0 1.5px, transparent 1.5px);
   background-size: 24px 24px;
 }
+
+@keyframes decision-scan {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(110%);
+  }
+}
+
+@keyframes decision-orbit {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes decision-rise {
+  0%, 100% {
+    transform: scaleY(0.55);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+.decision-scan-line {
+  animation: decision-scan 2.2s ease-in-out infinite;
+}
+
+.decision-orbit {
+  animation: decision-orbit 8s linear infinite;
+}
+
+.decision-rise {
+  transform-origin: bottom;
+  animation: decision-rise 1.4s ease-in-out infinite;
+}
