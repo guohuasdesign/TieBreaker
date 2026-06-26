@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
-import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -14,14 +13,22 @@ const app = express();
 // Middleware for parsing JSON bodies
 app.use(express.json());
 
+const Type = {
+  STRING: "STRING",
+  INTEGER: "INTEGER",
+  ARRAY: "ARRAY",
+  OBJECT: "OBJECT",
+} as const;
+
 // Initialize Gemini SDK with telemetry user-agent
-const getGeminiClient = () => {
+const getGeminiClient = async () => {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error(
       "GEMINI_API_KEY environment variable is not defined. Please add it in Settings > Secrets.",
     );
   }
+  const { GoogleGenAI } = await import("@google/genai");
   return new GoogleGenAI({
     apiKey: apiKey,
     httpOptions: {
@@ -414,7 +421,7 @@ const generateClaudeDecisionAnalysis = async (userPrompt: string) => {
 };
 
 const generateGeminiDecisionAnalysis = async (userPrompt: string) => {
-  const ai = getGeminiClient();
+  const ai = await getGeminiClient();
 
   const response = await generateContentWithFallback(ai, userPrompt, {
     responseMimeType: "application/json",
@@ -1514,7 +1521,7 @@ app.post("/api/generate-decision-image", async (req, res) => {
       return;
     }
 
-    const ai = getGeminiClient();
+    const ai = await getGeminiClient();
     const imageModels = [
       "imagen-4.0-fast-generate-001",
       "imagen-4.0-generate-001",
