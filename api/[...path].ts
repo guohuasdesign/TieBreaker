@@ -1,6 +1,6 @@
 export default async function handler(req: any, res: any) {
   try {
-    const { default: app } = await import("../app");
+    const { default: app } = await import("../app.js");
     return app(req, res);
   } catch (error: any) {
     console.error("API function initialization failed:", error);
