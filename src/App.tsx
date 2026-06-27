@@ -243,6 +243,7 @@ export default function App() {
   const [savedDecisions, setSavedDecisions] = useState<SavedDecision[]>([]);
   const [activeDecisionId, setActiveDecisionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isDeepeningAnalysis, setIsDeepeningAnalysis] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [decisionIllustration, setDecisionIllustration] = useState<{
     key: string;
@@ -328,10 +329,41 @@ export default function App() {
     setDraftDecision(null);
     setActiveDecisionId(null);
     setSelectedOptionTab(0);
+    setIsDeepeningAnalysis(false);
     resetDecisionIllustration();
     setError(null);
     setShowLanding(false);
     setShowCreationForm(true);
+  };
+
+  const applyAnalysisUpdate = (decisionId: string, analysisResult: DecisionAnalysis) => {
+    setDraftDecision((current) => {
+      if (!current || current.id !== decisionId) return current;
+      return {
+        ...current,
+        options: analysisResult.options,
+        analysis: analysisResult,
+        customWeights: {},
+      };
+    });
+
+    setSavedDecisions((current) => {
+      const updated = current.map((decision) => {
+        if (decision.id !== decisionId) return decision;
+        return {
+          ...decision,
+          options: analysisResult.options,
+          analysis: analysisResult,
+          customWeights: {},
+        };
+      });
+      try {
+        localStorage.setItem('the_tiebreaker_decisions', JSON.stringify(updated));
+      } catch (e) {
+        console.error("Failed to persist updated analysis:", e);
+      }
+      return updated;
+    });
   };
 
   const handleSaveDraft = () => {
@@ -361,29 +393,31 @@ export default function App() {
     personalSituation: string
   ) => {
     setIsLoading(true);
+    setIsDeepeningAnalysis(false);
     setError(null);
 
     try {
-      const response = await fetch('/api/analyze-decision', {
+      const payload = {
+        decision: decisionText,
+        options,
+        archetype,
+        personalSituation
+      };
+      const quickResponse = await fetch('/api/analyze-decision-quick', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          decision: decisionText,
-          options,
-          archetype,
-          personalSituation
-        }),
+        body: JSON.stringify(payload),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Server responded with status ${response.status}`);
+      if (!quickResponse.ok) {
+        const errorData = await quickResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server responded with status ${quickResponse.status}`);
       }
 
-      const analysisResult = normalizeDecisionAnalysisForClient(
-        await response.json(),
+      const quickAnalysisResult = normalizeDecisionAnalysisForClient(
+        await quickResponse.json(),
         decisionText,
         options,
         archetype
@@ -393,10 +427,10 @@ export default function App() {
         id: `dec_${Date.now()}`,
         title: decisionText,
         createdAt: new Date().toISOString(),
-        options: analysisResult.options,
+        options: quickAnalysisResult.options,
         archetype,
         personalSituation,
-        analysis: analysisResult,
+        analysis: quickAnalysisResult,
         customWeights: {},
       };
 
@@ -405,12 +439,46 @@ export default function App() {
       setSelectedOptionTab(0);
       setShowLanding(false);
       setShowCreationForm(false);
+      setIsLoading(false);
+
+      setIsDeepeningAnalysis(true);
+      fetch('/api/analyze-decision', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `Server responded with status ${response.status}`);
+          }
+          return response.json();
+        })
+        .then((data) => {
+          const deepAnalysisResult = normalizeDecisionAnalysisForClient(
+            data,
+            decisionText,
+            options,
+            archetype
+          );
+          applyAnalysisUpdate(newSaved.id, deepAnalysisResult);
+        })
+        .catch((err: any) => {
+          console.warn("Deep analysis update failed:", err?.message || err);
+        })
+        .finally(() => {
+          setIsDeepeningAnalysis(false);
+        });
 
     } catch (err: any) {
       console.error(err);
       setError(
         err.message || "An unexpected error occurred. Please make sure your ANTHROPIC_API_KEY is configured."
       );
+      setIsLoading(false);
+      setIsDeepeningAnalysis(false);
     } finally {
       setIsLoading(false);
     }
@@ -508,6 +576,7 @@ export default function App() {
     }
     setActiveDecisionId(decision.id);
     setSelectedOptionTab(0);
+    setIsDeepeningAnalysis(false);
     setShowLanding(false);
     setShowCreationForm(false);
     setError(null);
@@ -804,7 +873,7 @@ export default function App() {
                     <div>
                       <p className="text-[11px] font-bold uppercase tracking-[0.25em] text-orange-300">AI decision engine</p>
                       <h3 className="mt-2 text-2xl md:text-3xl font-display font-black leading-tight">Mapping tradeoffs</h3>
-                      <p className="mt-2 text-sm text-[#ede9e0]/55 leading-relaxed">Scoring options and building your verdict.</p>
+                      <p className="mt-2 text-sm text-[#ede9e0]/55 leading-relaxed">Building a quick verdict first. Deeper scoring will refine it after.</p>
                     </div>
                     <div className="grid grid-cols-4 gap-2 h-16 items-end">
                       {[72, 46, 88, 60].map((height, idx) => (
@@ -819,8 +888,8 @@ export default function App() {
               </div>
               <div className="p-5 bg-[#ede9e0]">
                 <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.18em] text-[#0a0908]/40 mb-2">
-                  <span>Generating recommendation</span>
-                  <span>Please wait</span>
+                  <span>Generating quick recommendation</span>
+                  <span>First pass</span>
                 </div>
                 <div className="h-1 w-full rounded-full bg-[#0a0908]/10 overflow-hidden">
                   <div className="h-full w-2/3 rounded-full bg-gradient-to-r from-orange-400 via-pink-400 to-violet-400 decision-scan-line"></div>
@@ -936,7 +1005,44 @@ export default function App() {
         ) : (
           /* ── Results Dashboard ── */
           activeDecision && (
-            <div className="flex flex-col" id="bento-dashboard-stage">
+            <div className="grid min-h-[calc(100vh-72px)] grid-cols-1 lg:grid-cols-[150px_1fr]" id="bento-dashboard-stage">
+              <aside className="hidden min-h-[calc(100vh-72px)] border-r border-[#0a0908]/8 bg-[#ede9e0]/55 px-4 lg:block">
+                <nav className="sticky top-1/2 -translate-y-1/2 space-y-0.5">
+                  <p className="mb-5 px-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#0a0908]/28">Sections</p>
+                  {[
+                    ['Verdict', CheckCircle2, 'analysis-recommendation-section'],
+                    ['SWOT', Shield, 'bento-item-swot'],
+                    ['Comparison', Scale, 'analysis-comparison-section'],
+                    ['Weights', Sliders, 'analysis-tuning-section'],
+                    ['Archive', FolderOpen, 'bento-item-history'],
+                  ].map(([label, Icon, target], index) => {
+                    const NavIcon = Icon as typeof Plus;
+                    return (
+                      <button
+                        key={label as string}
+                        type="button"
+                        onClick={() => {
+                          document.getElementById(target as string)?.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'start',
+                          });
+                        }}
+                        className={`group flex w-full cursor-pointer items-center gap-2.5 px-1 py-2 text-left text-[10px] font-black uppercase tracking-[0.12em] transition-colors ${
+                          index === 0
+                            ? 'text-[#0a0908]'
+                            : 'text-[#0a0908]/34 hover:text-[#0a0908]/65'
+                        }`}
+                      >
+                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full transition-colors ${index === 0 ? 'bg-orange-400' : 'bg-[#0a0908]/18 group-hover:bg-[#0a0908]/35'}`}></span>
+                        <NavIcon className="h-3.5 w-3.5 shrink-0 opacity-45" />
+                        <span className="truncate">{label as string}</span>
+                      </button>
+                    );
+                  })}
+                </nav>
+              </aside>
+
+              <div className="min-w-0">
               {/* Draft Banner */}
               {draftDecision && (
                 <div className="mx-6 md:mx-10 mt-6 p-4 bg-[#0a0908]/4 border border-[#0a0908]/12 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4" id="draft-decision-banner">
@@ -1173,10 +1279,23 @@ export default function App() {
                 <section className="order-1 bg-[#0a0908] px-6 py-10 text-[#ede9e0] md:px-10 md:py-12" id="analysis-recommendation-section">
                 <div className="mx-auto flex w-full max-w-7xl flex-col justify-between gap-6">
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between relative z-10">
-                      <div className="inline-flex items-center gap-1.5 bg-[#ede9e0]/8 px-2.5 py-1 rounded-lg text-[9px] font-bold tracking-widest uppercase text-orange-300 border border-[#ede9e0]/10">
-                        <Brain className="w-3.5 h-3.5" />
-                        AI Tiebreaker Decision
+                    <div className="flex items-center justify-between gap-3 relative z-10">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="inline-flex items-center gap-1.5 bg-[#ede9e0]/8 px-2.5 py-1 rounded-lg text-[9px] font-bold tracking-widest uppercase text-orange-300 border border-[#ede9e0]/10">
+                          <Brain className="w-3.5 h-3.5" />
+                          AI Tiebreaker Decision
+                        </div>
+                        {isDeepeningAnalysis && (
+                          <div className="inline-flex items-center gap-1.5 bg-orange-300/12 px-2.5 py-1 rounded-lg text-[9px] font-bold tracking-widest uppercase text-orange-200 border border-orange-200/15">
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            Refining full analysis
+                          </div>
+                        )}
+                        {!isDeepeningAnalysis && activeDecision.analysis.analysisProvider?.includes('quick') && (
+                          <div className="inline-flex items-center gap-1.5 bg-[#ede9e0]/8 px-2.5 py-1 rounded-lg text-[9px] font-bold tracking-widest uppercase text-[#ede9e0]/45 border border-[#ede9e0]/10">
+                            Quick draft
+                          </div>
+                        )}
                       </div>
                       <span className="text-[#ede9e0]/30 text-[10px] font-mono">CONF-MTR v1.0</span>
                     </div>
@@ -1454,6 +1573,7 @@ export default function App() {
                   <button type="button" onClick={startNewDecision} className="hover:text-[#0a0908] transition-colors cursor-pointer">New Decision</button>
                 </div>
               </footer>
+              </div>
             </div>
           )
         )}

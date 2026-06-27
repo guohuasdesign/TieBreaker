@@ -367,15 +367,27 @@ const parseJsonObjectFromText = (text: string) => {
   }
 };
 
-const generateClaudeDecisionAnalysis = async (userPrompt: string) => {
+const generateClaudeDecisionAnalysis = async (
+  userPrompt: string,
+  options: {
+    maxTokens?: number;
+    temperature?: number;
+    timeoutMs?: number;
+    system?: string;
+    label?: string;
+  } = {},
+) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY is not configured.");
   }
 
   const model = process.env.CLAUDE_DECISION_MODEL || "claude-sonnet-4-6";
-  console.log(`Executing Tiebreaker analysis on Claude model ${model}`);
-  const timeoutMs = Number(process.env.AI_DECISION_TIMEOUT_MS || 18000);
+  console.log(
+    `Executing Tiebreaker ${options.label || "analysis"} on Claude model ${model}`,
+  );
+  const timeoutMs =
+    options.timeoutMs || Number(process.env.AI_DECISION_TIMEOUT_MS || 18000);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -389,9 +401,10 @@ const generateClaudeDecisionAnalysis = async (userPrompt: string) => {
     },
     body: JSON.stringify({
       model,
-      max_tokens: Number(process.env.CLAUDE_MAX_TOKENS || 7000),
-      temperature: 0.35,
+      max_tokens: options.maxTokens || Number(process.env.CLAUDE_MAX_TOKENS || 7000),
+      temperature: options.temperature ?? 0.35,
       system:
+        options.system ||
         "You are the analysis engine for a decision-making app. Return only one concise valid JSON object. Do not include markdown, commentary, code fences, or explanatory prose outside the JSON.",
       messages: [
         {
@@ -749,12 +762,16 @@ const buildLocalFallbackAnalysis = ({
   archetype,
   personalSituation,
   providerError,
+  analysisProvider = "local-fallback",
+  quick = false,
 }: {
   decision: string;
   normalizedOptions: string[];
   archetype: string;
   personalSituation?: string;
   providerError?: string;
+  analysisProvider?: string;
+  quick?: boolean;
 }) => {
   const safeOptions = normalizedOptions.length
     ? normalizedOptions
@@ -783,9 +800,13 @@ const buildLocalFallbackAnalysis = ({
     verdict: {
       chosenOption,
       confidenceScore: 62,
-      mainArgument: `${chosenOption} has the clearest signal under the ${profile.name} lens based on the information available. This is a fallback analysis because the AI provider did not return a usable structured response.`,
+      mainArgument: quick
+        ? `${chosenOption} has the clearest early signal under ${profile.name} lens. Treat this as a quick draft while the deeper analysis checks the tradeoffs.`
+        : `${chosenOption} has the clearest signal under ${profile.name} lens based on the information available. The recommendation is generated from a simpler local pass, so use the weights and next steps to pressure-test it.`,
       whatToWatchOutFor:
-        providerError ||
+        quick
+          ? "This first pass is intentionally brief; the deeper analysis may refine the scores or wording."
+          : providerError ||
         "The main risk is acting before the most important unknowns are clarified.",
       actionableNextSteps: [
         "Name the one constraint that matters most.",
@@ -825,7 +846,9 @@ const buildLocalFallbackAnalysis = ({
         cons: [
           {
             id: "con1",
-            text: "The evidence is incomplete because the AI provider response failed during structured analysis.",
+            text: quick
+              ? "This first pass uses limited detail so the initial result can appear quickly."
+              : "The evidence is incomplete because the model response could not be fully structured.",
             impact: "Medium",
             weight: 3,
             category: "Uncertainty",
@@ -846,7 +869,9 @@ const buildLocalFallbackAnalysis = ({
         "The selected reasoning style gives the evaluation a consistent lens.",
       ],
       weaknesses: [
-        "The fallback result is less nuanced than a full model-generated analysis.",
+        quick
+          ? "The quick draft is less nuanced than the full analysis."
+          : "The simpler result is less nuanced than a full model-generated analysis.",
         "Some personal tradeoffs may need manual adjustment with the sliders.",
       ],
       opportunities: [
@@ -854,7 +879,9 @@ const buildLocalFallbackAnalysis = ({
         "Clarifying one top constraint can sharpen the recommendation.",
       ],
       threats: [
-        "Provider instability may hide useful nuance.",
+        quick
+          ? "The full analysis may adjust the recommendation after more detailed scoring."
+          : "Provider instability may hide useful nuance.",
         "Delayed action can preserve ambiguity longer than necessary.",
       ],
     },
@@ -873,7 +900,7 @@ const buildLocalFallbackAnalysis = ({
             : `${optionName} may still work, but its signal is less clear on ${dimension.toLowerCase()}.`,
       })),
     })),
-    analysisProvider: "local-fallback",
+    analysisProvider,
   };
 };
 
@@ -1345,6 +1372,130 @@ const generateDashScopeDecisionImage = async (prompt: string) => {
 
   throw new Error(`No DashScope image model worked. ${errors.join(" | ")}`);
 };
+
+// Fast first pass for the two-stage analysis flow. It returns a complete but
+// deliberately compact result so the UI can move to the results page quickly.
+app.post("/api/analyze-decision-quick", async (req, res) => {
+  const { decision, options, archetype, personalSituation } = req.body || {};
+  const normalizedOptions =
+    Array.isArray(options) && options.length >= 2
+      ? options
+          .map((option: unknown) => toDisplayText(option).trim())
+          .filter(Boolean)
+      : ["Option A: Do it", "Option B: Do not do it"];
+  const safeDecision = toDisplayText(decision, "Untitled decision");
+  const safeArchetype = toDisplayText(archetype, "rationalist");
+
+  try {
+    if (!decision) {
+      res.status(400).json({ error: "No decision prompt provided" });
+      return;
+    }
+
+    const profile =
+      ARCHETYPE_PROFILES[safeArchetype as keyof typeof ARCHETYPE_PROFILES] ||
+      ARCHETYPE_PROFILES.rationalist;
+
+    const userPrompt = `
+      Return a FAST first-pass decision analysis as one valid JSON object only.
+      Keep it compact, concrete, and useful. Do not include markdown.
+
+      Decision: "${safeDecision}"
+      Personal context: "${personalSituation || "None provided."}"
+      Options:
+      ${normalizedOptions.map((opt: string, idx: number) => `- ${idx + 1}. "${opt}"`).join("\n")}
+
+      Lens: "${profile.name}"
+      ${profile.instruction}
+
+      Rules:
+      - This is a quick result. Prefer clarity over exhaustive detail.
+      - chosenOption must be EXACTLY one of these options: ${JSON.stringify(normalizedOptions)}
+      - Use the user's personal context when it is available.
+      - Return exactly 3 comparison dimensions.
+      - For every option include 2 pros and 2 cons.
+      - Use weights from 1 to 5 and make them meaningfully different.
+
+      Required JSON shape:
+      {
+        "decision": string,
+        "archetype": string,
+        "options": string[],
+        "verdict": {
+          "chosenOption": string,
+          "confidenceScore": number,
+          "mainArgument": string,
+          "whatToWatchOutFor": string,
+          "actionableNextSteps": string[]
+        },
+        "optionAnalyses": [
+          {
+            "optionName": string,
+            "overallScore": number,
+            "motto": string,
+            "pros": [{"id": string, "text": string, "impact": "High"|"Medium"|"Low", "weight": number, "category": string}],
+            "cons": [{"id": string, "text": string, "impact": "High"|"Medium"|"Low", "weight": number, "category": string}]
+          }
+        ],
+        "swot": {"strengths": string[], "weaknesses": string[], "opportunities": string[], "threats": string[]},
+        "comparisons": [
+          {
+            "dimension": string,
+            "description": string,
+            "ratings": [{"optionName": string, "score": number, "justification": string}]
+          }
+        ]
+      }
+    `;
+
+    let parsedJson: any;
+    let analysisProvider = "quick-fallback";
+
+    if (process.env.ANTHROPIC_API_KEY) {
+      parsedJson = await generateClaudeDecisionAnalysis(userPrompt, {
+        label: "quick analysis",
+        maxTokens: Number(process.env.CLAUDE_QUICK_MAX_TOKENS || 1800),
+        timeoutMs: Number(process.env.AI_QUICK_DECISION_TIMEOUT_MS || 8000),
+        temperature: 0.2,
+        system:
+          "You are the fast first-pass engine for a decision app. Return only one compact valid JSON object. Do not include markdown, commentary, code fences, or prose outside the JSON.",
+      });
+      analysisProvider = `${process.env.CLAUDE_DECISION_MODEL || "claude"}-quick`;
+    } else {
+      parsedJson = buildLocalFallbackAnalysis({
+        decision: safeDecision,
+        normalizedOptions,
+        archetype: safeArchetype,
+        personalSituation: toDisplayText(personalSituation),
+        analysisProvider: "quick-fallback",
+        quick: true,
+      });
+    }
+
+    const normalizedAnalysis = normalizeDecisionAnalysis({
+      parsedJson,
+      decision: safeDecision,
+      normalizedOptions,
+      archetype: safeArchetype,
+      analysisProvider,
+    });
+    res.json(normalizedAnalysis);
+  } catch (error: any) {
+    console.warn("Quick decision analysis fell back:", error?.message || error);
+    const fallbackAnalysis = buildLocalFallbackAnalysis({
+      decision: safeDecision,
+      normalizedOptions,
+      archetype: safeArchetype,
+      personalSituation: toDisplayText(personalSituation),
+      providerError:
+        error?.message ||
+        "The quick AI response was unavailable before returning structured data.",
+      analysisProvider: "quick-fallback",
+      quick: true,
+    });
+    res.json(fallbackAnalysis);
+  }
+});
 
 // API Route for decision analysis
 app.post("/api/analyze-decision", async (req, res) => {
