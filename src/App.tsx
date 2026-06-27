@@ -269,6 +269,7 @@ export default function App() {
   });
   
   // Creation state
+  const [showLanding, setShowLanding] = useState(true);
   const [showCreationForm, setShowCreationForm] = useState(true);
 
   // Active view option index for the pros & cons widget
@@ -308,6 +309,31 @@ export default function App() {
 
   const activeDecision = draftDecision || savedDecisions.find(d => d.id === activeDecisionId);
 
+  const resetDecisionIllustration = () => {
+    setDecisionIllustration({
+      key: '',
+      dataUrl: null,
+      mediaUrl: null,
+      mimeType: null,
+      isLoading: false,
+      error: null,
+      source: null,
+      model: null,
+      warning: null,
+      providerErrors: [],
+    });
+  };
+
+  const startNewDecision = () => {
+    setDraftDecision(null);
+    setActiveDecisionId(null);
+    setSelectedOptionTab(0);
+    resetDecisionIllustration();
+    setError(null);
+    setShowLanding(false);
+    setShowCreationForm(true);
+  };
+
   const handleSaveDraft = () => {
     if (!draftDecision) return;
     const updatedHistory = [draftDecision, ...savedDecisions];
@@ -322,6 +348,7 @@ export default function App() {
       setActiveDecisionId(savedDecisions[0].id);
     } else {
       setActiveDecisionId(null);
+      setShowLanding(false);
       setShowCreationForm(true);
     }
   };
@@ -376,6 +403,7 @@ export default function App() {
       setDraftDecision(newSaved);
       setActiveDecisionId(newSaved.id);
       setSelectedOptionTab(0);
+      setShowLanding(false);
       setShowCreationForm(false);
 
     } catch (err: any) {
@@ -480,6 +508,7 @@ export default function App() {
     }
     setActiveDecisionId(decision.id);
     setSelectedOptionTab(0);
+    setShowLanding(false);
     setShowCreationForm(false);
     setError(null);
   };
@@ -706,588 +735,487 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50 flex flex-col" id="app-root-container">
-      {/* Visual background grid texture */}
-      <div className="absolute inset-0 bg-dots pointer-events-none opacity-60 z-0"></div>
+    <div className="min-h-screen bg-[#ede9e0] text-[#0a0908] flex flex-col" id="app-root-container">
 
-      {/* Main Container */}
-      <div className="z-10 flex-grow max-w-7xl w-full mx-auto px-4 py-6 md:px-8 md:py-8 flex flex-col">
-        {/* Top Header Row */}
-        <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 pb-5 border-b border-zinc-200">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 bg-zinc-900 rounded-xl flex items-center justify-center shadow-md">
-                <Scale className="w-5 h-5 text-emerald-400" />
-              </div>
-              <h1 className="text-2xl font-extrabold tracking-tight font-display text-zinc-900">
-                The Tiebreaker
-              </h1>
-            </div>
-            
-            {activeDecision && !showCreationForm ? (
-              <p className="text-xs text-zinc-500 font-medium">
-                Decision Profile:{' '}
-                <span className="text-indigo-600 font-bold underline decoration-indigo-200 underline-offset-4">
-                  {currentArchetypeConfig?.emoji} {currentArchetypeConfig?.name}
-                </span>
-              </p>
-            ) : (
-              <p className="text-xs text-zinc-500 font-medium font-sans">
-                A gorgeous Bento-styled, AI-assisted workspace for breaking complex ties and tuning options.
-              </p>
-            )}
+      {/* ── TOP NAV ── */}
+      <header className="flex items-center justify-between px-6 md:px-10 py-4 border-b border-[#0a0908]/10 sticky top-0 bg-[#ede9e0]/92 backdrop-blur-sm z-40">
+        <button
+          type="button"
+          onClick={() => {
+            setShowLanding(true);
+            setShowCreationForm(true);
+            setError(null);
+          }}
+          className="flex cursor-pointer items-center gap-2.5 text-left"
+        >
+          <div className="w-6 h-6 bg-[#0a0908] rounded-sm flex items-center justify-center shrink-0">
+            <Scale className="w-3.5 h-3.5 text-[#ede9e0]" />
           </div>
+          <span className="font-display font-black text-sm tracking-tight uppercase">TIE BREAKER.</span>
+        </button>
+        <nav className="flex items-center gap-6">
+          {activeDecision && !showCreationForm && (
+            <span className="hidden md:block text-xs font-medium uppercase tracking-[0.18em] text-[#0a0908]/35 max-w-[260px] truncate">
+              {activeDecision.title}
+            </span>
+          )}
+          {!showLanding && !showCreationForm && (
+            <button
+              id="toggle-archive-view-btn"
+              type="button"
+              onClick={startNewDecision}
+              className="cursor-pointer rounded-full bg-[#0a0908] px-4 py-2 text-xs font-black uppercase tracking-[0.15em] text-[#ede9e0] shadow-lg shadow-[#0a0908]/10 transition-all hover:bg-[#0a0908]/85"
+            >
+              Restart Decision
+            </button>
+          )}
+        </nav>
+      </header>
 
-          <div className="flex items-center gap-2.5">
-            {(savedDecisions.length > 0 || draftDecision) && (
-              <button
-                id="toggle-archive-view-btn"
-                type="button"
-                onClick={() => {
-                  if (!showCreationForm && draftDecision) {
-                    const updatedHistory = [draftDecision, ...savedDecisions];
-                    saveDecisionsToStorage(updatedHistory);
-                    setDraftDecision(null);
-                  }
-                  setShowCreationForm(!showCreationForm);
-                }}
-                className={`cursor-pointer px-4 py-2 border rounded-xl text-xs font-semibold shadow-2xs transition-all ${
-                  showCreationForm 
-                    ? 'bg-zinc-900 text-white border-transparent hover:bg-zinc-800' 
-                    : 'bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-100'
-                }`}
-              >
-                {showCreationForm ? "Back to Analysis Dashboard" : "Create New Decision"}
-              </button>
-            )}
-          </div>
-        </header>
-
-        {/* Global Error Notice */}
+        {/* ── Global Error Notice ── */}
         {error && (
-          <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 mb-6 flex items-start gap-3" id="error-notice">
-            <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+          <div className="mx-6 md:mx-10 mt-4 border border-[#0a0908]/15 rounded-xl p-4 flex items-start gap-3 bg-[#0a0908]/4" id="error-notice">
+            <AlertTriangle className="w-4 h-4 text-[#0a0908]/50 shrink-0 mt-0.5" />
             <div className="space-y-1">
-              <h4 className="text-xs font-bold text-rose-800 font-display">Analysis Engine Interrupted</h4>
-              <p className="text-xs text-rose-700 font-sans leading-relaxed">{error}</p>
-              <p className="text-[11px] text-zinc-500 mt-2">
-                Tip: Ensure you have added your <code className="font-mono bg-rose-100/50 px-1 py-0.5 rounded text-rose-800">ANTHROPIC_API_KEY</code> in <code className="font-mono bg-rose-100/50 px-1 py-0.5 rounded text-rose-800">.env.local</code>.
+              <h4 className="text-xs font-black uppercase tracking-[0.15em]">Analysis Interrupted</h4>
+              <p className="text-xs text-[#0a0908]/65 leading-relaxed">{error}</p>
+              <p className="text-[11px] text-[#0a0908]/35 mt-1">
+                Ensure <code className="font-mono bg-[#0a0908]/6 px-1 rounded">ANTHROPIC_API_KEY</code> is set in <code className="font-mono bg-[#0a0908]/6 px-1 rounded">.env.local</code>.
               </p>
             </div>
           </div>
         )}
 
+        {/* ── Loading Overlay ── */}
         {isLoading && (
-          <div className="fixed inset-0 z-50 bg-zinc-950/70 backdrop-blur-sm flex items-center justify-center px-4" id="ai-analysis-visual-loader">
-            <div className="w-full max-w-3xl bg-white rounded-3xl border border-zinc-200 shadow-2xl overflow-hidden">
-              <div className="relative bg-zinc-950 text-white p-6 md:p-8 overflow-hidden">
-                <div className="absolute inset-0 opacity-20 bg-dots"></div>
-                <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-400 via-sky-400 to-indigo-400 decision-scan-line"></div>
-                <div className="relative grid grid-cols-1 md:grid-cols-[220px_1fr] gap-6 items-center">
-                  <div className="relative mx-auto w-44 h-44">
-                    <div className="absolute inset-0 rounded-full border border-emerald-400/30"></div>
-                    <div className="absolute inset-5 rounded-full border border-sky-400/25 decision-orbit"></div>
-                    <div className="absolute inset-10 rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center">
-                      <Brain className="w-16 h-16 text-emerald-300" />
+          <div className="fixed inset-0 z-50 bg-[#0a0908]/55 backdrop-blur-sm flex items-center justify-center px-4" id="ai-analysis-visual-loader">
+            <div className="w-full max-w-2xl bg-[#ede9e0] rounded-2xl border border-[#0a0908]/10 overflow-hidden">
+              <div className="relative bg-[#0a0908] text-[#ede9e0] p-6 md:p-8 overflow-hidden">
+                <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-orange-400 via-pink-400 to-violet-400 decision-scan-line"></div>
+                <div className="relative grid grid-cols-1 md:grid-cols-[180px_1fr] gap-6 items-center">
+                  <div className="relative mx-auto w-36 h-36 shrink-0">
+                    <div className="absolute inset-0 rounded-full border border-orange-400/25"></div>
+                    <div className="absolute inset-4 rounded-full border border-pink-400/20 decision-orbit"></div>
+                    <div className="absolute inset-8 rounded-full bg-[#0a0908] border border-[#ede9e0]/10 flex items-center justify-center">
+                      <Brain className="w-12 h-12 text-orange-300" />
                     </div>
-                    <div className="absolute left-1/2 top-1/2 w-2 h-2 -ml-1 -mt-1 rounded-full bg-emerald-300 shadow-[0_0_30px_rgba(52,211,153,0.9)]"></div>
-                    {[0, 1, 2, 3].map((idx) => (
-                      <span
-                        key={idx}
-                        className="absolute w-3 h-3 rounded-full bg-sky-300"
-                        style={{
-                          left: `${50 + Math.cos((idx * Math.PI) / 2) * 42}%`,
-                          top: `${50 + Math.sin((idx * Math.PI) / 2) * 42}%`,
-                        }}
-                      ></span>
-                    ))}
                   </div>
-                  <div className="space-y-5">
+                  <div className="space-y-4">
                     <div>
-                      <p className="text-sm font-bold uppercase tracking-[0.2em] text-emerald-300">AI decision engine</p>
-                      <h3 className="mt-2 text-3xl md:text-4xl font-black font-display leading-tight">Mapping tradeoffs visually</h3>
-                      <p className="mt-3 text-base text-zinc-300 leading-relaxed">
-                        Scoring options, weighing risks, and building a readable verdict.
-                      </p>
+                      <p className="text-[11px] font-bold uppercase tracking-[0.25em] text-orange-300">AI decision engine</p>
+                      <h3 className="mt-2 text-2xl md:text-3xl font-display font-black leading-tight">Mapping tradeoffs</h3>
+                      <p className="mt-2 text-sm text-[#ede9e0]/55 leading-relaxed">Scoring options and building your verdict.</p>
                     </div>
-                    <div className="grid grid-cols-4 gap-3 h-24 items-end">
+                    <div className="grid grid-cols-4 gap-2 h-16 items-end">
                       {[72, 46, 88, 60].map((height, idx) => (
-                        <div key={idx} className="bg-zinc-800 rounded-xl p-2 flex items-end">
-                          <div
-                            className="w-full rounded-lg bg-gradient-to-t from-emerald-500 to-sky-300 decision-rise"
-                            style={{ height: `${height}%`, animationDelay: `${idx * 0.16}s` }}
-                          ></div>
+                        <div key={idx} className="bg-[#ede9e0]/6 rounded-lg p-1.5 flex items-end">
+                          <div className="w-full rounded bg-gradient-to-t from-orange-400 to-pink-300 decision-rise"
+                            style={{ height: `${height}%`, animationDelay: `${idx * 0.16}s` }} />
                         </div>
                       ))}
                     </div>
                   </div>
                 </div>
               </div>
-              <div className="p-5 md:p-6 bg-white">
-                <div className="flex items-center justify-between text-sm font-semibold text-zinc-700 mb-3">
+              <div className="p-5 bg-[#ede9e0]">
+                <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.18em] text-[#0a0908]/40 mb-2">
                   <span>Generating recommendation</span>
-                  <span className="text-indigo-600">Please wait...</span>
+                  <span>Please wait</span>
                 </div>
-                <div className="h-3 w-full rounded-full bg-zinc-100 overflow-hidden">
-                  <div className="h-full w-2/3 rounded-full bg-gradient-to-r from-emerald-500 via-sky-500 to-indigo-500 decision-scan-line"></div>
+                <div className="h-1 w-full rounded-full bg-[#0a0908]/10 overflow-hidden">
+                  <div className="h-full w-2/3 rounded-full bg-gradient-to-r from-orange-400 via-pink-400 to-violet-400 decision-scan-line"></div>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* Dynamic workspace layout */}
-        {showCreationForm ? (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start" id="creation-layout">
-            <div className="lg:col-span-8">
-              <DecisionForm onSubmit={handleAnalyzeDecision} isLoading={isLoading} />
+        {/* ── Content ── */}
+        {showLanding ? (
+          <section className="hero-story-scene relative flex min-h-[calc(100vh-65px)] items-center overflow-hidden border-t border-[#0a0908]/10 bg-[#ede9e0] px-6 py-12 md:px-10 md:py-16" id="landing-hero">
+              <div className="hero-horizon pointer-events-none absolute inset-0" />
+              <div className="hero-path hero-path-left pointer-events-none absolute" />
+              <div className="hero-path hero-path-right pointer-events-none absolute" />
+              <div className="hero-choice-card hero-choice-card-left pointer-events-none absolute">
+                <span>Option A</span>
+                <strong>Stay steady</strong>
+              </div>
+              <div className="hero-choice-card hero-choice-card-right pointer-events-none absolute">
+                <span>Option B</span>
+                <strong>Step forward</strong>
+              </div>
+              <div className="gradient-orb orb-morph absolute left-1/2 top-[48%] h-[270px] w-[270px] -translate-x-1/2 -translate-y-1/2 opacity-82 pointer-events-none md:left-[61%] md:h-[440px] md:w-[440px]" />
+              <div className="orb-ring hero-orb-ring absolute left-1/2 top-[48%] h-[410px] w-[410px] -translate-x-1/2 -translate-y-1/2 pointer-events-none md:left-[61%] md:h-[640px] md:w-[640px]" />
+              <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-col justify-center">
+                <div className="mb-7 flex items-center gap-3">
+                  <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#0a0908] shadow-lg shadow-[#0a0908]/10">
+                    <Scale className="h-6 w-6 text-[#ede9e0]" />
+                  </div>
+                  <div>
+                    <p className="font-display text-3xl font-black tracking-tight text-[#0a0908] md:text-5xl">Tie Breaker</p>
+                    <p className="mt-1 text-sm font-black uppercase tracking-[0.18em] text-orange-500 md:text-base">AI-powered decision support</p>
+                  </div>
+                </div>
+                <h1 className="max-w-3xl font-display text-5xl font-black uppercase leading-[0.92] tracking-tight text-[#0a0908] sm:text-7xl md:text-8xl">
+                  Break the <span className="text-orange-400">tie.</span>
+                </h1>
+                <p className="mt-6 max-w-xl text-base font-medium leading-relaxed text-[#0a0908]/48 md:text-lg">
+                  Compare options, see trade-offs, and decide with clarity.
+                </p>
+                <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <button
+                    type="button"
+                    onClick={startNewDecision}
+                    className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#0a0908] px-6 py-3 text-sm font-black uppercase tracking-[0.12em] text-[#ede9e0] shadow-lg shadow-[#0a0908]/10 transition-all hover:bg-[#0a0908]/85 sm:w-auto"
+                  >
+                    Start a decision
+                    <ChevronRight className="h-4 w-4 text-orange-400" />
+                  </button>
+                </div>
+              </div>
+            </section>
+        ) : showCreationForm ? (
+          <>
+            <div id="creation-layout" className="grid min-h-[calc(100vh-72px)] grid-cols-1 border-t border-[#0a0908]/10 lg:grid-cols-[150px_1fr]">
+              <aside className="hidden min-h-[calc(100vh-72px)] border-r border-[#0a0908]/8 bg-[#ede9e0]/55 px-4 lg:block">
+                <nav className="sticky top-1/2 -translate-y-1/2 space-y-0.5">
+                  <p className="mb-5 px-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#0a0908]/28">Sections</p>
+                  {[
+                    ['New Decision', Plus, 'new-decision-section'],
+                    ['Examples', BookOpen, 'presets-container'],
+                    ['Context', Calendar, 'personal-situation-group'],
+                    ['Key Factors', TrendingUp, 'priority-factors-group'],
+                    ['Options', FolderOpen, 'inputs-container'],
+                    ['AI Lens', Sliders, 'ai-lens-section'],
+                    ...(savedDecisions.length > 0 ? [['Archive', FolderOpen, 'creation-archive-section']] : []),
+                  ].map(([label, Icon, target], index) => {
+                    const NavIcon = Icon as typeof Plus;
+                    return (
+                      <button
+                        key={label as string}
+                        type="button"
+                        onClick={() => {
+                          document.getElementById(target as string)?.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'start',
+                          });
+                        }}
+                        className={`group flex w-full cursor-pointer items-center gap-2.5 px-1 py-2 text-left text-[10px] font-black uppercase tracking-[0.12em] transition-colors ${
+                          index === 0
+                            ? 'text-[#0a0908]'
+                            : 'text-[#0a0908]/34 hover:text-[#0a0908]/65'
+                        }`}
+                      >
+                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full transition-colors ${index === 0 ? 'bg-orange-400' : 'bg-[#0a0908]/18 group-hover:bg-[#0a0908]/35'}`}></span>
+                        <NavIcon className="h-3.5 w-3.5 shrink-0 opacity-45" />
+                        <span className="truncate">{label as string}</span>
+                      </button>
+                    );
+                  })}
+                </nav>
+              </aside>
+
+              <main className="min-w-0 bg-white">
+                <div className="px-0">
+                  <DecisionForm onSubmit={handleAnalyzeDecision} isLoading={isLoading} />
+                </div>
+
+                {savedDecisions.length > 0 && (
+                  <section id="creation-archive-section" className="border-t border-[#0a0908]/10 p-6 md:p-10">
+                    <SavedDecisions
+                      savedDecisions={savedDecisions}
+                      activeDecisionId={activeDecisionId}
+                      onSelectDecision={handleSelectDecision}
+                      onDeleteDecision={handleDeleteDecision}
+                    />
+                  </section>
+                )}
+              </main>
             </div>
-            <div className="lg:col-span-4 lg:sticky lg:top-6">
-              <SavedDecisions
-                savedDecisions={savedDecisions}
-                activeDecisionId={activeDecisionId}
-                onSelectDecision={handleSelectDecision}
-                onDeleteDecision={handleDeleteDecision}
-              />
-            </div>
-          </div>
+          </>
         ) : (
-          /* Bento Dashboard Stage */
+          /* ── Results Dashboard ── */
           activeDecision && (
-            <div className="space-y-6" id="bento-dashboard-stage">
-              {/* Draft banner, if this is a draft analysis */}
+            <div className="flex flex-col" id="bento-dashboard-stage">
+              {/* Draft Banner */}
               {draftDecision && (
-                <div className="p-4 md:p-5 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-3xl shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 relative overflow-hidden" id="draft-decision-banner">
+                <div className="mx-6 md:mx-10 mt-6 p-4 bg-[#0a0908]/4 border border-[#0a0908]/12 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4" id="draft-decision-banner">
                   <div className="flex gap-3 items-start">
-                    <div className="w-9 h-9 bg-amber-500 rounded-xl flex items-center justify-center shadow-md shrink-0 text-white mt-0.5">
-                      <Sparkles className="w-5 h-5 text-white" />
+                    <div className="w-7 h-7 bg-orange-400 rounded-lg flex items-center justify-center shrink-0 mt-0.5">
+                      <Sparkles className="w-3.5 h-3.5 text-[#0a0908]" />
                     </div>
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-[9px] bg-amber-100/80 text-amber-800 border border-amber-200 font-bold px-1.5 py-0.5 rounded uppercase tracking-wider">
-                          DRAFT PREVIEW
-                        </span>
-                        <h4 className="text-xs font-bold text-amber-900 font-display">New AI Analysis Generated!</h4>
-                      </div>
-                      <p className="text-xs text-amber-800 font-sans leading-relaxed max-w-2xl">
-                        This analysis is currently unsaved. You can interactively tune weights or change lenses. Save it to keep it in your permanent Archive, or discard it to start fresh.
-                      </p>
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#0a0908]/40">DRAFT PREVIEW</p>
+                      <p className="text-xs text-[#0a0908]/58 leading-relaxed mt-0.5 max-w-xl">New analysis ready. Tune weights or save to archive.</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2.5 w-full sm:w-auto shrink-0 justify-end">
-                    <button
-                      id="discard-draft-btn"
-                      type="button"
-                      onClick={handleDiscardDraft}
-                      className="cursor-pointer text-xs font-semibold px-4 py-2 border border-rose-200 text-rose-700 bg-white hover:bg-rose-50 rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Discard Draft
+                  <div className="flex items-center gap-2.5 shrink-0">
+                    <button id="discard-draft-btn" type="button" onClick={handleDiscardDraft}
+                      className="cursor-pointer text-xs font-black uppercase tracking-[0.12em] px-3 py-1.5 border border-[#0a0908]/15 hover:bg-[#0a0908]/5 rounded-lg transition-colors flex items-center gap-1.5">
+                      <Trash2 className="w-3 h-3" />Discard
                     </button>
-                    <button
-                      id="save-draft-btn"
-                      type="button"
-                      onClick={handleSaveDraft}
-                      className="cursor-pointer text-xs font-semibold px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                      Save & Archive
+                    <button id="save-draft-btn" type="button" onClick={handleSaveDraft}
+                      className="cursor-pointer text-xs font-black uppercase tracking-[0.12em] px-3 py-1.5 bg-[#0a0908] text-[#ede9e0] hover:bg-[#0a0908]/80 rounded-lg transition-colors flex items-center gap-1.5">
+                      <Check className="w-3 h-3" />Save
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* Header Info Bento Block */}
-              <div className="p-5 md:p-6 bg-white border border-zinc-200 rounded-3xl shadow-xs space-y-3 relative overflow-hidden">
-                {/* Accent decoration bar */}
-                <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-indigo-500 via-emerald-500 to-sky-500"></div>
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                  <div className="space-y-1">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-indigo-50 border border-indigo-100 text-indigo-700 font-mono">
-                      Active Tiebreaker Case File
-                    </span>
-                    <h2 className="text-lg md:text-xl font-bold font-display text-zinc-900 leading-normal">
-                      &ldquo;{activeDecision.title}&rdquo;
-                    </h2>
-                    {activeDecision.personalSituation && (
-                      <p className="text-xs bg-zinc-50 border border-zinc-200/60 p-3 rounded-xl text-zinc-600 font-sans mt-2 italic flex items-start gap-1.5 max-w-4xl leading-relaxed">
-                        <span className="text-indigo-500 font-serif font-black text-sm shrink-0">&ldquo;</span>
-                        <span className="flex-1">{activeDecision.personalSituation}</span>
-                        <span className="text-indigo-500 font-serif font-black text-sm shrink-0">&rdquo;</span>
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      id="reset-weights-btn"
-                      onClick={resetWeights}
-                      title="Reset weights default"
-                      className="cursor-pointer text-xs font-semibold px-3 py-1.5 rounded-lg border border-zinc-200 hover:bg-zinc-50 flex items-center gap-1 text-zinc-600 transition-colors"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      Reset Weights
-                    </button>
-                    <button
-                      id="restart-decision-btn"
-                      onClick={() => {
-                        if (draftDecision) {
-                          const updatedHistory = [draftDecision, ...savedDecisions];
-                          saveDecisionsToStorage(updatedHistory);
-                          setDraftDecision(null);
-                        }
-                        setShowCreationForm(true);
-                      }}
-                      className="cursor-pointer text-xs font-semibold px-3 py-1.5 rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 flex items-center gap-1.5 transition-colors"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      New Analysis
-                    </button>
-                  </div>
-                </div>
-
-                {/* Perspective Switching Bar */}
-                <div className="border-t border-zinc-100 pt-4 mt-4" id="ai-persona-toggles-bar">
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                        </span>
-                        <h4 className="text-xs font-bold font-display text-zinc-800 flex items-center gap-1.5">
-                          <Brain className="w-3.5 h-3.5 text-indigo-500" />
-                          Compare AI Persona Lenses
-                        </h4>
-                      </div>
-                      <p className="text-[11px] text-zinc-500 font-sans">
-                        Toggle to instantly view how another decision profile scores this split under your situation.
-                      </p>
-                    </div>
-                    
-                    <div className="flex flex-wrap gap-1.5" id="perspectives-list-actions">
+              {/* ── Editorial Verdict Hero ── */}
+              <section className="relative px-6 md:px-10 py-12 md:py-16 overflow-hidden border-b border-[#0a0908]/10">
+                <div className="gradient-orb orb-breathe absolute -right-20 -top-20 w-72 h-72 md:w-[420px] md:h-[420px] opacity-38 pointer-events-none" />
+                <div className="orb-ring absolute -right-28 -top-28 w-[420px] h-[420px] md:w-[580px] md:h-[580px] pointer-events-none" />
+                <div className="relative z-10 max-w-7xl mx-auto">
+                  {/* Archetype switcher + actions */}
+                  <div className="flex flex-wrap items-center justify-between gap-4 mb-10" id="ai-persona-toggles-bar">
+                    <div className="flex flex-wrap gap-1.5">
                       {ARCHETYPES.map((arch) => {
                         const isCurrentActive = activeDecision.archetype === arch.id;
                         return (
-                          <button
-                            key={arch.id}
-                            id={`perspective-btn-${arch.id}`}
-                            type="button"
-                            disabled={isLoading}
-                            onClick={() => handleSwitchArchetype(arch.id)}
-                            className={`cursor-pointer px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-all flex items-center gap-1.5 select-none ${
+                          <button key={arch.id} id={`perspective-btn-${arch.id}`} type="button"
+                            disabled={isLoading} onClick={() => handleSwitchArchetype(arch.id)}
+                            className={`cursor-pointer px-3 py-1.5 rounded-full border text-xs font-bold uppercase tracking-[0.1em] transition-all select-none ${
                               isCurrentActive
-                                ? 'bg-indigo-600 text-white border-transparent shadow-xs ring-2 ring-indigo-600/10'
-                                : 'bg-zinc-50 text-zinc-700 border-zinc-200/80 hover:bg-zinc-100 hover:text-zinc-900 focus:outline-hidden disabled:opacity-50'
-                            }`}
-                          >
-                            <span>{arch.emoji}</span>
-                            <span>{arch.name}</span>
-                            {isCurrentActive && isLoading && (
-                              <RefreshCw className="w-3 h-3 animate-spin duration-700" />
-                            )}
+                                ? 'bg-[#0a0908] text-[#ede9e0] border-transparent'
+                                : 'border-[#0a0908]/18 text-[#0a0908]/55 hover:border-[#0a0908]/35 hover:text-[#0a0908] disabled:opacity-40'
+                            }`}>
+                            {arch.emoji} {arch.name}
+                            {isCurrentActive && isLoading && <RefreshCw className="inline w-3 h-3 ml-1.5 animate-spin" />}
                           </button>
                         );
                       })}
                     </div>
-                  </div>
-                </div>
-              </div>
-
-              <section className="grid grid-cols-1 lg:grid-cols-12 gap-5" id="decision-visual-summary">
-                <div className="lg:col-span-12 bg-zinc-950 text-white rounded-3xl p-6 md:p-8 shadow-lg relative overflow-hidden">
-                  <div className="absolute inset-0 opacity-15 bg-dots"></div>
-                  <div className="relative z-10 space-y-6">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <span className="inline-flex items-center gap-2 rounded-full bg-emerald-400/10 border border-emerald-300/20 px-3 py-1.5 text-sm font-bold text-emerald-300">
-                        <CheckCircle2 className="w-4 h-4" />
-                        {verdictTone}
-                      </span>
-                      <span className="text-sm text-zinc-400">
-                        {isWeightedOverride ? 'Updated by your weight tuning' : `Recommended by ${currentArchetypeConfig?.name}`}
-                      </span>
-                      {activeDecision.analysis.analysisProvider && (
-                        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold text-zinc-300">
-                          Engine: {activeDecision.analysis.analysisProvider}
-                        </span>
-                      )}
+                    <div className="flex items-center gap-5">
+                      <button type="button" id="reset-weights-btn" onClick={resetWeights}
+                        className="cursor-pointer text-[11px] font-bold uppercase tracking-[0.15em] text-[#0a0908]/38 hover:text-[#0a0908] transition-colors flex items-center gap-1.5">
+                        <RotateCcw className="w-3 h-3" />Reset
+                      </button>
+                      <button type="button" id="restart-decision-btn"
+                        onClick={startNewDecision}
+                        className="cursor-pointer rounded-full bg-[#0a0908] px-4 py-2 text-[11px] font-black uppercase tracking-[0.15em] text-[#ede9e0] shadow-lg shadow-[#0a0908]/10 transition-colors hover:bg-[#0a0908]/85 flex items-center gap-1.5">
+                        <Plus className="w-3 h-3 text-orange-300" />Start over
+                      </button>
                     </div>
-
-                    <div className="space-y-3">
-                      <p className="text-sm font-bold uppercase tracking-[0.18em] text-zinc-400">Best option</p>
-                      <h2 className="text-4xl md:text-6xl font-black font-display leading-none text-white">
+                  </div>
+                  {/* Verdict */}
+                  <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-6 items-end">
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-[#0a0908]/38 mb-4 flex items-center gap-3">
+                        <span className="inline-block w-8 h-px bg-[#0a0908]/20"></span>
+                        {verdictTone} · {isWeightedOverride ? 'Weighted Recommendation' : `${currentArchetypeConfig?.name} Lens`}
+                      </p>
+                      <h2 className="text-[48px] md:text-[68px] lg:text-[84px] font-display font-black uppercase leading-none tracking-tight">
                         {weightedRecommendedOption}
                       </h2>
-                      <p className="text-lg md:text-xl text-zinc-300 leading-relaxed max-w-3xl">
-                        {weightedArgument}
-                      </p>
                       {isWeightedOverride && (
-                        <p className="text-sm text-amber-200/90">
+                        <p className="text-xs text-[#0a0908]/38 mt-2 uppercase tracking-[0.15em]">
                           Original AI verdict: {activeDecision.analysis.verdict.chosenOption}
                         </p>
                       )}
+                      <p className="mt-5 text-base md:text-lg text-[#0a0908]/62 max-w-2xl leading-relaxed">{weightedArgument}</p>
                     </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-                      <div className="rounded-2xl bg-white/8 border border-white/10 p-4">
-                        <p className="text-xs uppercase tracking-widest text-zinc-500 font-bold">Confidence</p>
-                        <p className="mt-1 text-3xl font-black text-emerald-300">{confidence}%</p>
-                      </div>
-                      <div className="rounded-2xl bg-white/8 border border-white/10 p-4">
-                        <p className="text-xs uppercase tracking-widest text-zinc-500 font-bold">Criteria won</p>
-                        <p className="mt-1 text-3xl font-black text-sky-300">
-                          {topComparisonWins[weightedRecommendedOption] || 0}
-                          <span className="text-base text-zinc-500">/{activeDecision.analysis.comparisons?.length || 0}</span>
-                        </p>
-                      </div>
-                      <div className="rounded-2xl bg-white/8 border border-white/10 p-4">
-                        <p className="text-xs uppercase tracking-widest text-zinc-500 font-bold">Options</p>
-                        <p className="mt-1 text-3xl font-black text-indigo-300">{activeDecision.options.length}</p>
+                    <div className="text-right shrink-0">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0a0908]/28 mb-1">Confidence</p>
+                      <p className="text-[76px] md:text-[96px] font-display font-black leading-none text-orange-400">
+                        {confidence}<span className="text-2xl font-display font-black">%</span>
+                      </p>
+                      <div className="flex justify-end gap-4 mt-2 text-xs text-[#0a0908]/35 font-bold uppercase tracking-[0.12em]">
+                        <span>{topComparisonWins[weightedRecommendedOption] || 0}/{activeDecision.analysis.comparisons?.length || 0} criteria</span>
+                        <span>{activeDecision.options.length} options</span>
                       </div>
                     </div>
                   </div>
                 </div>
               </section>
 
-              {/* Bento Grid Core Structure */}
-              <main className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-5" id="bento-main-grid">
-                
-                {/* 1. OPTIONS TUNER */}
-                <div className="lg:col-span-4 border border-zinc-200 rounded-3xl bg-gradient-to-b from-white to-zinc-50/80 p-5 shadow-xs h-full flex flex-col gap-4 overflow-hidden" id="bento-item-tuner">
-                    <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2.5 h-5 bg-indigo-500 rounded-full"></div>
-                        <h3 className="font-bold text-zinc-800 font-display text-sm">Weights Tuner</h3>
+              {/* ── Full Page Analysis Workspace ── */}
+              <main className="w-full" id="analysis-workspace">
+              <div className="flex flex-col" id="analysis-sections">
+
+                {/* 1. WEIGHTS TUNER */}
+                <section className="order-4 border-t border-[#0a0908]/10 bg-[#ede9e0] px-6 py-10 md:px-10 md:py-12" id="analysis-tuning-section">
+                  <div className="mx-auto flex w-full max-w-7xl flex-col gap-7" id="bento-item-tuner">
+                    <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                      <div className="max-w-2xl">
+                        <div className="mb-3 flex items-center gap-2">
+                          <div className="h-5 w-1 rounded-full bg-orange-400"></div>
+                          <h3 className="font-display text-xs font-black uppercase tracking-[0.14em] text-[#0a0908]">Weights Tuner</h3>
+                        </div>
+                        <p className="text-sm leading-relaxed text-[#0a0908]/52">
+                          Adjust the importance of each pro and con. Scores update across every option, so the tuner works as a full-page comparison tool on desktop and mobile.
+                        </p>
                       </div>
-                      <span className="text-[10px] bg-amber-50 border border-amber-100 text-amber-700 font-mono px-2 py-0.5 rounded-full select-none">
-                        Interactive
-                      </span>
+                      {leadingOptionObj && (
+                        <div className="w-full border border-orange-200 bg-orange-50 px-4 py-3 md:w-auto">
+                          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-orange-700">Current leader</p>
+                          <p className="mt-1 text-lg font-black text-[#0a0908]">{leadingOptionObj.optionName} · {leadingOptionObj.score}%</p>
+                        </div>
+                      )}
                     </div>
 
-                    <p className="text-sm text-zinc-500 leading-relaxed">
-                      Adjust the individual priority weights (1-5) below. Watch internal AI scores shift dynamically!
-                    </p>
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4" id="tuner-option-strength">
+                      {recalculatedScores.map((calc, idx) => {
+                        const isLeader = leadingOptionObj?.optionName === calc.optionName;
+                        return (
+                          <div key={idx} className={`border p-4 ${isLeader ? 'border-orange-300 bg-orange-50' : 'border-[#0a0908]/10 bg-white/55'}`}>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-black text-[#0a0908]" title={calc.optionName}>{calc.optionName}</p>
+                                <p className="mt-1 text-[11px] font-semibold text-[#0a0908]/42">Pros {calc.proPower} / Cons {calc.conPower}</p>
+                              </div>
+                              <span className={`text-2xl font-black ${isLeader ? 'text-orange-500' : 'text-[#0a0908]/35'}`}>{calc.score}%</span>
+                            </div>
+                            <div className="mt-4 h-2.5 w-full overflow-hidden rounded-full bg-[#0a0908]/8">
+                              <div
+                                className={`h-full rounded-full transition-all duration-500 ${isLeader ? 'bg-orange-400' : 'bg-[#0a0908]/25'}`}
+                                style={{ width: `${calc.score}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
 
-                    <div className="rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-emerald-50 p-4 space-y-4 shadow-inner" id="tuner-option-strength">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <h4 className="text-base font-black font-display text-zinc-900">Option strength</h4>
-                          <p className="text-xs text-zinc-500 mt-0.5">Live result after your weight changes.</p>
-                        </div>
-                        {leadingOptionObj && (
-                          <span className="shrink-0 rounded-full bg-white border border-emerald-100 px-2.5 py-1 text-xs font-black text-emerald-700">
-                            Leader {leadingOptionObj.score}%
-                          </span>
-                        )}
-                      </div>
+                    <div className="grid grid-cols-1 gap-5 xl:grid-cols-2" id="sliders-scroller">
+                      {activeDecision.analysis.optionAnalyses.map((option, optIdx) => {
+                        const score = recalculatedScores[optIdx];
+                        const isLeader = leadingOptionObj?.optionName === option.optionName;
+                        return (
+                          <section key={option.optionName || optIdx} className="border border-[#0a0908]/10 bg-white/55 p-4 md:p-5">
+                            <div className="mb-5 flex flex-col gap-3 border-b border-[#0a0908]/8 pb-4 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0">
+                                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-[#0a0908]/35">Option {String.fromCharCode(65 + optIdx)}</p>
+                                <h4 className="mt-1 truncate font-display text-xl font-black text-[#0a0908]" title={option.optionName}>{option.optionName}</h4>
+                                {option.motto && <p className="mt-1 text-xs font-semibold text-[#0a0908]/45">{option.motto}</p>}
+                              </div>
+                              <div className={`shrink-0 px-3 py-2 text-right ${isLeader ? 'bg-orange-50 text-orange-700' : 'bg-[#0a0908]/5 text-[#0a0908]/50'}`}>
+                                <p className="text-[10px] font-black uppercase tracking-[0.14em]">Score</p>
+                                <p className="text-xl font-black">{score?.score ?? 0}%</p>
+                              </div>
+                            </div>
 
-                      <div className="space-y-3">
-                        {recalculatedScores.map((calc, idx) => {
-                          const isLeader = leadingOptionObj?.optionName === calc.optionName;
-                          return (
-                            <div key={idx} className="space-y-1.5">
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="min-w-0">
-                                  <p className="text-sm font-black text-zinc-900 leading-snug truncate" title={calc.optionName}>
-                                    {calc.optionName}
-                                  </p>
-                                  <p className="text-[11px] text-zinc-500">
-                                    Pros {calc.proPower} / Cons {calc.conPower}
-                                  </p>
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                              <div className="space-y-2.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] font-black uppercase tracking-[0.14em] text-orange-600">Pros Weight</span>
+                                  <span className="text-[10px] font-mono text-[#0a0908]/35">1-5</span>
                                 </div>
-                                <span className={`text-lg font-black ${isLeader ? 'text-emerald-600' : 'text-zinc-500'}`}>
-                                  {calc.score}%
-                                </span>
+                                {(option.pros || []).map((pro, proIdx) => {
+                                  const key = `${optIdx}-pro-${proIdx}`;
+                                  const currentVal = activeDecision.customWeights[key] !== undefined
+                                    ? activeDecision.customWeights[key]
+                                    : pro.weight;
+                                  return (
+                                    <div key={pro.id || proIdx} className="border border-orange-100 bg-orange-50/65 p-3">
+                                      <div className="flex items-start justify-between gap-2">
+                                        <span className="text-sm font-medium leading-relaxed text-[#0a0908]">{pro.text}</span>
+                                        <span className="shrink-0 border border-orange-100 bg-white px-1.5 py-0.5 font-mono text-[10px] font-bold text-orange-700">{pro.impact}</span>
+                                      </div>
+                                      <div className="mt-3 flex items-center gap-3">
+                                        <input
+                                          type="range"
+                                          min="1"
+                                          max="5"
+                                          step="1"
+                                          value={currentVal}
+                                          onChange={(e) => handleWeightChange(optIdx, 'pro', proIdx, parseInt(e.target.value))}
+                                          className="h-1.5 flex-grow cursor-pointer appearance-none rounded-lg bg-orange-200 accent-orange-500"
+                                        />
+                                        <span className="w-4 text-right font-mono text-xs font-black text-orange-700">{currentVal}</span>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                               </div>
-                              <div className="h-3.5 w-full bg-white rounded-full overflow-hidden border border-zinc-100 shadow-inner">
-                                <div
-                                  className={`h-full rounded-full transition-all duration-500 ${isLeader ? 'bg-gradient-to-r from-emerald-500 to-sky-400' : 'bg-zinc-400'}`}
-                                  style={{ width: `${calc.score}%` }}
-                                ></div>
+
+                              <div className="space-y-2.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] font-black uppercase tracking-[0.14em] text-[#0a0908]/55">Cons Weight</span>
+                                  <span className="text-[10px] font-mono text-[#0a0908]/35">1-5</span>
+                                </div>
+                                {(option.cons || []).map((con, conIdx) => {
+                                  const key = `${optIdx}-con-${conIdx}`;
+                                  const currentVal = activeDecision.customWeights[key] !== undefined
+                                    ? activeDecision.customWeights[key]
+                                    : con.weight;
+                                  return (
+                                    <div key={con.id || conIdx} className="border border-[#0a0908]/8 bg-[#0a0908]/4 p-3">
+                                      <div className="flex items-start justify-between gap-2">
+                                        <span className="text-sm font-medium leading-relaxed text-[#0a0908]">{con.text}</span>
+                                        <span className="shrink-0 border border-[#0a0908]/10 bg-[#ede9e0] px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#0a0908]/60">{con.impact}</span>
+                                      </div>
+                                      <div className="mt-3 flex items-center gap-3">
+                                        <input
+                                          type="range"
+                                          min="1"
+                                          max="5"
+                                          step="1"
+                                          value={currentVal}
+                                          onChange={(e) => handleWeightChange(optIdx, 'con', conIdx, parseInt(e.target.value))}
+                                          className="h-1.5 flex-grow cursor-pointer appearance-none rounded-lg bg-[#0a0908]/15 accent-[#0a0908]"
+                                        />
+                                        <span className="w-4 text-right font-mono text-xs font-black text-[#0a0908]/55">{currentVal}</span>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
+                          </section>
+                        );
+                      })}
                     </div>
-
-                    {/* Selector of Option to configure */}
-                    <div className="flex bg-zinc-100 p-1 rounded-xl gap-1" id="option-tabs">
-                      {activeDecision.options.map((opt, optIdx) => (
-                        <button
-                          key={optIdx}
-                          id={`tab-opt-${optIdx}`}
-                          type="button"
-                          onClick={() => setSelectedOptionTab(optIdx)}
-                          className={`flex-1 text-center py-2 text-xs font-bold rounded-lg transition-all truncate px-1 cursor-pointer ${
-                            selectedOptionTab === optIdx
-                              ? 'bg-white text-zinc-900 shadow-2xs'
-                              : 'text-zinc-500 hover:text-zinc-800'
-                          }`}
-                        >
-                          {opt}
-                        </button>
-                      ))}
-                    </div>
-
-                    {selectedOptionScore && (
-                      <div className="grid grid-cols-[76px_1fr] gap-3 rounded-2xl border border-zinc-200 bg-white p-3 shadow-xs">
-                        <div
-                          className="relative h-16 w-16 rounded-full grid place-items-center"
-                          style={{
-                            background: `conic-gradient(#10b981 ${selectedOptionScore.score * 3.6}deg, #e4e4e7 0deg)`
-                          }}
-                        >
-                          <div className="h-11 w-11 rounded-full bg-white border border-zinc-100 grid place-items-center">
-                            <span className="text-sm font-black text-zinc-900">{selectedOptionScore.score}</span>
-                          </div>
-                        </div>
-                        <div className="min-w-0 self-center">
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 font-mono">Selected lens</p>
-                          <p className="text-sm font-black text-zinc-900 truncate" title={selectedOptionName}>
-                            {selectedOptionName}
-                          </p>
-                          <div className="mt-2 grid grid-cols-2 gap-2">
-                            <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-2 py-1">
-                              <p className="text-[9px] font-bold uppercase text-emerald-700">Pros</p>
-                              <p className="text-xs font-black text-emerald-900">{selectedOptionScore.proPower}</p>
-                            </div>
-                            <div className="rounded-lg bg-rose-50 border border-rose-100 px-2 py-1">
-                              <p className="text-[9px] font-bold uppercase text-rose-700">Cons</p>
-                              <p className="text-xs font-black text-rose-900">{selectedOptionScore.conPower}</p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Tuning Container */}
-                    <div className="space-y-4 mt-1 flex-1 min-h-[300px] overflow-y-auto pr-1 pb-1" id="sliders-scroller">
-                      <div className="space-y-2.5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-bold text-emerald-700 uppercase tracking-widest font-display">Pros Weight Factor</span>
-                          <span className="text-[10px] text-zinc-400 font-mono">Set priority</span>
-                        </div>
-                        {(activeDecision.analysis.optionAnalyses[selectedOptionTab]?.pros || []).map((pro, proIdx) => {
-                          const key = `${selectedOptionTab}-pro-${proIdx}`;
-                          const currentVal = activeDecision.customWeights[key] !== undefined 
-                            ? activeDecision.customWeights[key] 
-                            : pro.weight;
-                          return (
-                            <div key={pro.id || proIdx} className="bg-emerald-50/70 hover:bg-emerald-50 border border-emerald-100/70 rounded-xl p-2.5 space-y-1.5 transition-all shadow-xs">
-                              <div className="flex items-start justify-between gap-1">
-                                <span className="text-sm text-emerald-950 font-medium leading-relaxed">{pro.text}</span>
-                                <span className="text-[10px] font-bold bg-white text-emerald-800 px-1.5 py-0.5 rounded-md border border-emerald-100 font-mono shrink-0 select-none">{pro.impact}</span>
-                              </div>
-                              <div className="flex items-center gap-3">
-                                <input
-                                  type="range"
-                                  min="1"
-                                  max="5"
-                                  step="1"
-                                  value={currentVal}
-                                  onChange={(e) => handleWeightChange(selectedOptionTab, 'pro', proIdx, parseInt(e.target.value))}
-                                  className="flex-grow h-1.5 bg-emerald-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
-                                />
-                                <span className="text-[10px] font-mono font-bold text-emerald-800 w-3 text-right">{currentVal}</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                        {(activeDecision.analysis.optionAnalyses[selectedOptionTab]?.pros || []).length === 0 && (
-                          <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3 text-xs font-medium text-emerald-900">
-                            No pros returned for this option yet. Regenerate the analysis to create tunable factors.
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="space-y-2.5 pt-2 border-t border-zinc-100">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-bold text-rose-700 uppercase tracking-widest font-display">Cons Weight Factor</span>
-                        </div>
-                        {(activeDecision.analysis.optionAnalyses[selectedOptionTab]?.cons || []).map((con, conIdx) => {
-                          const key = `${selectedOptionTab}-con-${conIdx}`;
-                          const currentVal = activeDecision.customWeights[key] !== undefined 
-                            ? activeDecision.customWeights[key] 
-                            : con.weight;
-                          return (
-                            <div key={con.id || conIdx} className="bg-rose-50/70 hover:bg-rose-50 border border-rose-100/70 rounded-xl p-2.5 space-y-1.5 transition-all shadow-xs">
-                              <div className="flex items-start justify-between gap-1">
-                                <span className="text-sm text-rose-950 font-medium leading-relaxed">{con.text}</span>
-                                <span className="text-[10px] font-bold bg-white text-rose-800 px-1.5 py-0.5 rounded-md border border-rose-100 font-mono shrink-0 select-none">{con.impact}</span>
-                              </div>
-                              <div className="flex items-center gap-3">
-                                <input
-                                  type="range"
-                                  min="1"
-                                  max="5"
-                                  step="1"
-                                  value={currentVal}
-                                  onChange={(e) => handleWeightChange(selectedOptionTab, 'con', conIdx, parseInt(e.target.value))}
-                                  className="flex-grow h-1.5 bg-rose-200 rounded-lg appearance-none cursor-pointer accent-rose-600"
-                                />
-                                <span className="text-[10px] font-mono font-bold text-rose-800 w-3 text-right">{currentVal}</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                        {(activeDecision.analysis.optionAnalyses[selectedOptionTab]?.cons || []).length === 0 && (
-                          <div className="rounded-xl border border-rose-100 bg-rose-50/60 p-3 text-xs font-medium text-rose-900">
-                            No cons returned for this option yet. Regenerate the analysis to create tunable factors.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                </div>
+                  </div>
+                </section>
 
                 {/* 2. VERDICT / AI RECOMMENDATION */}
-                <div className="lg:col-span-8 bg-zinc-900 rounded-3xl shadow-md p-6 md:p-8 text-white flex flex-col justify-between relative overflow-hidden space-y-6" id="bento-item-verdict">
-                  {/* Decorative faint grid lines */}
-                  <div className="absolute inset-x-0 bottom-0 h-44 bg-gradient-to-t from-zinc-800/100 to-transparent pointer-events-none opacity-20"></div>
-                  
+                <section className="order-1 bg-[#0a0908] px-6 py-10 text-[#ede9e0] md:px-10 md:py-12" id="analysis-recommendation-section">
+                <div className="mx-auto flex w-full max-w-7xl flex-col justify-between gap-6">
                   <div className="space-y-4">
                     <div className="flex items-center justify-between relative z-10">
-                      <div className="inline-flex items-center gap-1 bg-zinc-800 px-2.5 py-1 rounded-lg text-[9px] font-bold tracking-widest uppercase text-emerald-400 border border-zinc-75/10">
-                        <Brain className="w-3.5 h-3.5 fill-emerald-500/20" />
+                      <div className="inline-flex items-center gap-1.5 bg-[#ede9e0]/8 px-2.5 py-1 rounded-lg text-[9px] font-bold tracking-widest uppercase text-orange-300 border border-[#ede9e0]/10">
+                        <Brain className="w-3.5 h-3.5" />
                         AI Tiebreaker Decision
                       </div>
-                      <span className="text-zinc-500 text-[10px] font-mono">CONF-MTR v1.0</span>
+                      <span className="text-[#ede9e0]/30 text-[10px] font-mono">CONF-MTR v1.0</span>
                     </div>
 
                     <div className="space-y-1.5 relative z-10">
-                      <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-orange-400">
                         {isWeightedOverride ? 'Weighted Recommendation' : 'Chosen Recommendation'}
                       </p>
-                      <h3 className="text-3xl md:text-4xl font-black font-display text-white leading-tight">
+                      <h3 className="text-3xl md:text-4xl font-black font-display text-[#ede9e0] leading-tight">
                         {weightedRecommendedOption}
                       </h3>
-                      <p className="text-zinc-300 text-base leading-relaxed font-sans">
+                      <p className="text-[#ede9e0]/65 text-base leading-relaxed font-sans">
                         {weightedArgument}
                       </p>
                       {isWeightedOverride && (
-                        <div className="inline-flex rounded-full bg-amber-400/10 border border-amber-300/20 px-3 py-1 text-xs font-bold text-amber-200">
+                        <div className="inline-flex rounded-full bg-orange-400/10 border border-orange-300/20 px-3 py-1 text-xs font-bold text-orange-200">
                           Original AI verdict: {activeDecision.analysis.verdict.chosenOption}
                         </div>
                       )}
                     </div>
 
-                    {/* Alert bullet: Watch out for */}
-                    <div className="bg-amber-500/10 border border-amber-400/20 rounded-xl p-3 space-y-1 relative z-10">
-                      <div className="flex items-center gap-1.5 text-amber-300">
+                    {/* Alert: Watch out for */}
+                    <div className="bg-[#ede9e0]/5 border border-[#ede9e0]/10 rounded-xl p-3 space-y-1 relative z-10">
+                      <div className="flex items-center gap-1.5 text-orange-300">
                         <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                         <span className="text-[10px] font-bold uppercase tracking-wider font-display">Watch out for</span>
                       </div>
-                      <p className="text-sm text-amber-100 leading-relaxed">
+                      <p className="text-sm text-[#ede9e0]/70 leading-relaxed">
                         {weightedPrimaryRisk}
                       </p>
                     </div>
 
                     {/* Actionable items */}
                     <div className="space-y-2 relative z-10">
-                      <p className="text-xs font-semibold text-zinc-400 uppercase tracking-widest font-mono">Actionable next steps:</p>
-                      <div className="space-y-2 text-sm text-zinc-200">
+                      <p className="text-xs font-semibold text-[#ede9e0]/35 uppercase tracking-widest font-mono">Actionable next steps:</p>
+                      <div className="space-y-2 text-sm text-[#ede9e0]/80">
                         {weightedNextSteps.map((step, sIdx) => (
-                          <div key={sIdx} className="flex items-start gap-3 bg-zinc-800/50 border border-white/10 px-3 py-3 rounded-xl">
-                            <span className="w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center text-xs font-bold text-emerald-400 shrink-0 font-mono">
+                          <div key={sIdx} className="flex items-start gap-3 bg-[#ede9e0]/5 border border-[#ede9e0]/8 px-3 py-3 rounded-xl">
+                            <span className="w-6 h-6 rounded-full bg-orange-400 flex items-center justify-center text-xs font-bold text-[#0a0908] shrink-0 font-mono">
                               {sIdx + 1}
                             </span>
                             <span className="leading-relaxed">{step}</span>
@@ -1297,54 +1225,54 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="pt-4 border-t border-zinc-800 relative z-10">
-                    <div className="flex justify-between text-[11px] font-bold uppercase text-zinc-400 font-display mb-1.5">
+                  <div className="pt-4 border-t border-[#ede9e0]/10 relative z-10">
+                    <div className="flex justify-between text-[11px] font-bold uppercase text-[#ede9e0]/35 font-display mb-1.5">
                       <span>{isWeightedOverride ? 'Weighted confidence' : 'Tiebreak confidence'}</span>
-                      <span className="text-emerald-400">{weightedConfidence}% Recommend</span>
+                      <span className="text-orange-400">{weightedConfidence}% Recommend</span>
                     </div>
-                    <div className="h-2 w-full bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="h-2 w-full bg-[#ede9e0]/10 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-emerald-400 transition-all duration-550 rounded-full"
+                        className="h-full bg-orange-400 transition-all duration-550 rounded-full"
                         style={{ width: `${weightedConfidence}%` }}
                       ></div>
                     </div>
                   </div>
 
-                  <div className="relative z-10 overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/70">
-                    <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-white/10">
+                  <div className="relative z-10 overflow-hidden rounded-2xl border border-[#ede9e0]/10 bg-[#ede9e0]/5">
+                    <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-[#ede9e0]/8">
                       <div>
-                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-500">Decision visual</p>
-                        <p className="mt-1 text-sm font-semibold text-zinc-200">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#ede9e0]/35">Decision visual</p>
+                        <p className="mt-1 text-sm font-semibold text-[#ede9e0]/80">
                           Generate from the current recommendation
                         </p>
                         {decisionIllustration.source && (
-                          <p className="mt-1 text-[11px] text-zinc-500">
+                          <p className="mt-1 text-[11px] text-[#ede9e0]/35">
                             Source: {decisionIllustration.source}
                             {decisionIllustration.model ? ` / ${decisionIllustration.model}` : ''}
                             {decisionIllustration.warning ? ` / fallback: ${decisionIllustration.warning}` : ''}
                           </p>
                         )}
                         {decisionIllustration.providerErrors && decisionIllustration.providerErrors.length > 0 && (
-                          <p className="mt-1 text-[11px] text-amber-300/80">
+                          <p className="mt-1 text-[11px] text-orange-300/80">
                             {decisionIllustration.providerErrors.join(' | ')}
                           </p>
                         )}
                       </div>
                       {decisionIllustration.isLoading ? (
-                        <RefreshCw className="w-4 h-4 text-emerald-300 animate-spin shrink-0" />
+                        <RefreshCw className="w-4 h-4 text-orange-300 animate-spin shrink-0" />
                       ) : (
                         <button
                           type="button"
                           onClick={handleGenerateDecisionIllustration}
                           disabled={!activeDecision || decisionIllustration.isLoading}
-                          className="shrink-0 cursor-pointer rounded-xl bg-emerald-400 px-3 py-2 text-xs font-black text-zinc-950 hover:bg-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          className="shrink-0 cursor-pointer rounded-xl bg-orange-400 px-3 py-2 text-xs font-black text-[#0a0908] hover:bg-orange-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                           Generate visual
                         </button>
                       )}
                     </div>
 
-                    <div className="relative aspect-[16/9] bg-zinc-900">
+                    <div className="relative aspect-[16/9] bg-[#0a0908]/40">
                       {(decisionIllustration.mediaUrl || decisionIllustration.dataUrl) && decisionIllustration.key === illustrationKey ? (
                         decisionIllustration.mimeType?.startsWith('video/') || decisionIllustration.mediaUrl ? (
                           <video
@@ -1365,18 +1293,18 @@ export default function App() {
                         )
                       ) : (
                         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
-                          <div className="w-16 h-16 rounded-2xl bg-zinc-800 border border-white/10 grid place-items-center">
+                          <div className="w-16 h-16 rounded-2xl bg-[#ede9e0]/8 border border-[#ede9e0]/10 grid place-items-center">
                             {decisionIllustration.error ? (
-                              <AlertTriangle className="w-7 h-7 text-amber-300" />
+                              <AlertTriangle className="w-7 h-7 text-orange-300" />
                             ) : (
-                              <Sparkles className="w-7 h-7 text-emerald-300" />
+                              <Sparkles className="w-7 h-7 text-orange-300" />
                             )}
                           </div>
                           <div className="space-y-1">
-                            <p className="text-sm font-bold text-zinc-200">
+                            <p className="text-sm font-bold text-[#ede9e0]/70">
                               {decisionIllustration.error ? "Visual unavailable" : "No visual yet"}
                             </p>
-                            <p className="text-xs text-zinc-500 max-w-md">
+                            <p className="text-xs text-[#ede9e0]/35 max-w-md">
                               {decisionIllustration.error || "Adjust weights until the decision feels right, then generate one visual interpretation. This may use image or video quota."}
                             </p>
                           </div>
@@ -1384,8 +1312,8 @@ export default function App() {
                       )}
 
                       {decisionIllustration.isLoading && (
-                        <div className="absolute inset-0 bg-zinc-950/45 backdrop-blur-[1px] flex items-center justify-center">
-                          <div className="rounded-full bg-zinc-950/80 border border-white/10 px-4 py-2 text-xs font-bold text-emerald-200 flex items-center gap-2">
+                        <div className="absolute inset-0 bg-[#0a0908]/50 backdrop-blur-[1px] flex items-center justify-center">
+                          <div className="rounded-full bg-[#0a0908]/80 border border-[#ede9e0]/10 px-4 py-2 text-xs font-bold text-orange-200 flex items-center gap-2">
                             <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                             Generating visual
                           </div>
@@ -1394,9 +1322,36 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+                </section>
+
+                <section className="order-2 border-t border-[#ede9e0]/10 bg-[#0a0908] px-6 pb-10 text-[#ede9e0] md:px-10" id="bento-item-swot">
+                  <div className="mx-auto w-full max-w-7xl">
+                    <div className="mb-5 flex items-center gap-2">
+                      <div className="h-4 w-1 rounded-full bg-orange-400"></div>
+                      <h3 className="text-xs font-black uppercase tracking-[0.12em] text-[#ede9e0]">SWOT Overview</h3>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      {[
+                        ['Strengths', activeDecision.analysis.swot?.strengths || [], 'text-green-300'],
+                        ['Weaknesses', activeDecision.analysis.swot?.weaknesses || [], 'text-rose-300'],
+                        ['Opportunities', activeDecision.analysis.swot?.opportunities || [], 'text-sky-300'],
+                        ['Threats', activeDecision.analysis.swot?.threats || [], 'text-amber-300'],
+                      ].map(([label, items, color]) => (
+                        <div key={label as string} className="border border-[#ede9e0]/10 bg-[#ede9e0]/5 p-4">
+                          <span className={`text-[10px] font-bold uppercase tracking-[0.15em] ${color as string}`}>{label as string}</span>
+                          <div className="mt-2 space-y-1.5">
+                            {(items as string[]).slice(0, 2).map((item, i) => (
+                              <p key={i} className="text-xs leading-relaxed text-[#ede9e0]/62">• {item}</p>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </section>
 
                 {/* 3. DECISION ARCHIVE */}
-                <div className="lg:col-span-4 border border-zinc-200 rounded-3xl bg-white p-4" id="bento-item-history">
+                <div className="order-5 border-t border-[#0a0908]/10 bg-[#ede9e0] p-6 md:p-10" id="bento-item-history">
                   <SavedDecisions
                     savedDecisions={savedDecisions}
                     activeDecisionId={activeDecisionId}
@@ -1405,15 +1360,16 @@ export default function App() {
                   />
                 </div>
 
-                {/* 3. COMPARISON DIMENSIONS TABLE */}
-                <div className="lg:col-start-5 lg:col-span-8 border border-zinc-200 bg-white rounded-3xl p-5 shadow-xs overflow-hidden flex flex-col justify-between" id="bento-item-table">
+                {/* 4. COMPARISON DIMENSIONS TABLE */}
+                <section className="order-3 border-t border-[#0a0908]/10 bg-white px-6 py-8 md:px-10" id="analysis-comparison-section">
+                <div className="mx-auto w-full max-w-7xl overflow-hidden p-0" id="bento-item-table">
                   <div className="space-y-4">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                       <div className="flex items-center gap-2">
-                        <div className="w-2.5 h-5 bg-sky-500 rounded-full"></div>
-                        <h3 className="font-bold text-zinc-800 font-display text-sm">Direct Comparison</h3>
+                        <div className="w-1 h-4 bg-[#0a0908]/25 rounded-full"></div>
+                        <h3 className="font-black text-[#0a0908] font-display text-xs uppercase tracking-[0.1em]">Direct Comparison</h3>
                       </div>
-                      <span className="inline-flex w-fit rounded-full bg-emerald-50 border border-emerald-100 px-3 py-1 text-xs font-black text-emerald-700">
+                      <span className="inline-flex w-fit rounded-full bg-orange-50 border border-orange-200 px-3 py-1 text-xs font-black text-orange-700">
                         Weighted leader: {weightedRecommendedOption} ({weightedConfidence}%)
                       </span>
                     </div>
@@ -1421,46 +1377,45 @@ export default function App() {
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm text-left border-collapse">
                         <thead>
-                          <tr className="border-b border-zinc-100 text-zinc-400 font-medium">
-                            <th className="pb-3 text-left font-display">Criterion Dimension</th>
+                          <tr className="border-b border-[#0a0908]/8 text-[#0a0908]/40 font-medium">
+                            <th className="pb-3 text-left font-display text-xs uppercase tracking-wider">Criterion</th>
                             {activeDecision.options.map((opt, i) => (
-                              <th key={i} className="pb-3 text-center px-1 font-mono truncate max-w-[85px]" title={opt}>
+                              <th key={i} className="pb-3 text-center px-1 font-mono text-xs truncate max-w-[85px]" title={opt}>
                                 {opt}
                               </th>
                             ))}
-                            <th className="pb-3 text-right font-display pl-2">Advantage</th>
+                            <th className="pb-3 text-right font-display text-xs uppercase tracking-wider pl-2">Advantage</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-zinc-50">
+                        <tbody className="divide-y divide-[#0a0908]/5">
                           {(activeDecision.analysis.comparisons || []).map((comp, idx) => {
-                            // Find option of max score
                             const sortedRatings = [...comp.ratings].sort((a,b) => b.score - a.score);
                             const topRatedName = sortedRatings[0].score > sortedRatings[1]?.score ? sortedRatings[0].optionName : 'Tie';
-                            
+
                             return (
-                              <tr key={idx} className="hover:bg-zinc-50/50">
+                              <tr key={idx} className="hover:bg-[#0a0908]/3">
                                 <td className="py-2.5 pr-2">
-                                  <div className="font-bold text-zinc-800" title={comp.dimension}>{comp.dimension}</div>
-                                  <div className="text-xs text-zinc-500 line-clamp-2 max-w-[220px]" title={comp.description}>{comp.description}</div>
+                                  <div className="font-bold text-[#0a0908]" title={comp.dimension}>{comp.dimension}</div>
+                                  <div className="text-xs text-[#0a0908]/45 line-clamp-2 max-w-[220px]" title={comp.description}>{comp.description}</div>
                                 </td>
                                 {(comp.ratings || []).map((rt, rIdx) => (
                                   <td key={rIdx} className="py-2.5 text-center px-1">
-                                    <span className="inline-block px-2 py-1 rounded-lg font-bold font-mono text-xs bg-zinc-100 text-zinc-800">
+                                    <span className="inline-block px-2 py-1 rounded-lg font-bold font-mono text-xs bg-[#0a0908]/6 text-[#0a0908]">
                                       {rt.score}/10
                                     </span>
                                   </td>
                                 ))}
                                 <td className="py-2.5 text-right pl-2 shrink-0">
                                   {topRatedName === weightedRecommendedOption ? (
-                                    <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-1 rounded-full text-xs font-black tracking-tight truncate max-w-[110px] inline-block">
+                                    <span className="bg-orange-50 text-orange-700 border border-orange-200 px-2 py-1 rounded-full text-xs font-black tracking-tight truncate max-w-[110px] inline-block">
                                       {topRatedName}
                                     </span>
                                   ) : topRatedName === 'Tie' ? (
-                                    <span className="bg-zinc-100 text-zinc-500 border border-zinc-200 px-2 py-1 rounded-full text-xs font-bold font-mono">
+                                    <span className="bg-[#0a0908]/5 text-[#0a0908]/45 border border-[#0a0908]/10 px-2 py-1 rounded-full text-xs font-bold font-mono">
                                       Tie
                                     </span>
                                   ) : (
-                                    <span className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-1 rounded-full text-xs font-black tracking-tight truncate max-w-[110px] inline-block">
+                                    <span className="bg-[#0a0908]/8 text-[#0a0908]/70 border border-[#0a0908]/12 px-2 py-1 rounded-full text-xs font-black tracking-tight truncate max-w-[110px] inline-block">
                                       {topRatedName}
                                     </span>
                                   )}
@@ -1473,96 +1428,35 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Visual Footer hint inside comparison table */}
-                  <div className="pt-3 border-t border-zinc-100 text-[10px] text-zinc-400 flex items-center gap-1">
-                    <Info className="w-3.5 h-3.5 text-zinc-300" />
-                    <span>Table scores are the original AI comparison. The green leader badge reflects your current weight tuning.</span>
+                  <div className="pt-3 border-t border-[#0a0908]/8 text-[10px] text-[#0a0908]/35 flex items-center gap-1">
+                    <Info className="w-3.5 h-3.5 text-[#0a0908]/25" />
+                    <span>Table scores are the original AI comparison. The orange leader badge reflects your current weight tuning.</span>
                   </div>
                 </div>
+                </section>
 
+              </div>
               </main>
 
-              <section className="border border-zinc-200 bg-white rounded-3xl p-5 md:p-6 shadow-xs space-y-4" id="bento-item-swot">
-                <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2.5 h-5 bg-emerald-500 rounded-full"></div>
-                      <h3 className="font-bold text-zinc-800 font-display text-base">SWOT Matrix</h3>
-                    </div>
-                    <p className="text-sm text-zinc-500 leading-relaxed">
-                      Supplemental strategy notes, moved below the core decision so it does not crowd the main reading path.
-                    </p>
-                  </div>
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 font-mono">
-                    Strategic appendix
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                  <div className="bg-teal-50/60 border border-teal-100 rounded-2xl p-4">
-                    <span className="text-xs font-bold text-teal-800 uppercase tracking-wider font-mono">Strengths</span>
-                    <div className="mt-2 space-y-2">
-                      {(activeDecision.analysis.swot?.strengths || []).slice(0, 2).map((item, i) => (
-                        <p key={i} className="text-sm text-teal-950 font-medium leading-relaxed">• {item}</p>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="bg-rose-50/60 border border-rose-100 rounded-2xl p-4">
-                    <span className="text-xs font-bold text-rose-800 uppercase tracking-wider font-mono">Weaknesses</span>
-                    <div className="mt-2 space-y-2">
-                      {(activeDecision.analysis.swot?.weaknesses || []).slice(0, 2).map((item, i) => (
-                        <p key={i} className="text-sm text-rose-950 font-medium leading-relaxed">• {item}</p>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="bg-sky-50/60 border border-sky-100 rounded-2xl p-4">
-                    <span className="text-xs font-bold text-sky-800 uppercase tracking-wider font-mono">Opportunities</span>
-                    <div className="mt-2 space-y-2">
-                      {(activeDecision.analysis.swot?.opportunities || []).slice(0, 2).map((item, i) => (
-                        <p key={i} className="text-sm text-sky-950 font-medium leading-relaxed">• {item}</p>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="bg-amber-50/60 border border-amber-100 rounded-2xl p-4">
-                    <span className="text-xs font-bold text-amber-800 uppercase tracking-wider font-mono">Threats</span>
-                    <div className="mt-2 space-y-2">
-                      {(activeDecision.analysis.swot?.threats || []).slice(0, 2).map((item, i) => (
-                        <p key={i} className="text-sm text-amber-950 font-medium leading-relaxed">• {item}</p>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </section>
-
-              {/* Bottom Footer Info Bar */}
-              <footer className="pt-4 border-t border-zinc-200 flex flex-col md:flex-row items-center justify-between text-xs text-zinc-400 gap-3">
-                <div className="flex items-center gap-4">
+              {/* ── Footer ── */}
+              <footer className="px-6 md:px-10 py-5 border-t border-[#0a0908]/10 flex flex-col md:flex-row items-center justify-between text-[11px] text-[#0a0908]/32 gap-3">
+                <div className="flex items-center gap-4 uppercase tracking-[0.15em] font-bold">
                   <span className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                    Interactive Tuning Available
+                    <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse"></span>
+                    Live Tuning
                   </span>
-                  <span className="hidden md:inline text-zinc-300">|</span>
-                  <span className="font-mono text-[10px]">Session Key: TIE-{activeDecision.id.substring(4, 9).toUpperCase()}</span>
+                  <span className="hidden md:inline text-[#0a0908]/15">|</span>
+                  <span className="font-mono text-[10px]">TIE-{activeDecision.id.substring(4, 9).toUpperCase()}</span>
                 </div>
-                <div className="flex flex-wrap gap-4 uppercase tracking-widest font-bold text-[10px]">
-                  <button onClick={resetWeights} className="hover:text-indigo-600 transition-colors select-none">
-                    Restore Defaults
-                  </button>
-                  <button onClick={() => window.print()} className="hover:text-indigo-600 transition-colors select-none">
-                    Print / Export PDF
-                  </button>
-                  <button onClick={() => setShowCreationForm(true)} className="hover:text-indigo-600 transition-colors select-none">
-                    New Decision
-                  </button>
+                <div className="flex flex-wrap gap-5 uppercase tracking-[0.15em] font-bold text-[10px]">
+                  <button type="button" onClick={resetWeights} className="hover:text-[#0a0908] transition-colors cursor-pointer">Restore Defaults</button>
+                  <button type="button" onClick={() => window.print()} className="hover:text-[#0a0908] transition-colors cursor-pointer">Print / Export</button>
+                  <button type="button" onClick={startNewDecision} className="hover:text-[#0a0908] transition-colors cursor-pointer">New Decision</button>
                 </div>
               </footer>
             </div>
           )
         )}
-      </div>
     </div>
   );
 }

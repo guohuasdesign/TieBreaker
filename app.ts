@@ -375,9 +375,13 @@ const generateClaudeDecisionAnalysis = async (userPrompt: string) => {
 
   const model = process.env.CLAUDE_DECISION_MODEL || "claude-sonnet-4-6";
   console.log(`Executing Tiebreaker analysis on Claude model ${model}`);
+  const timeoutMs = Number(process.env.AI_DECISION_TIMEOUT_MS || 18000);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
+    signal: controller.signal,
     headers: {
       "x-api-key": apiKey,
       "anthropic-version": process.env.ANTHROPIC_VERSION || "2023-06-01",
@@ -385,10 +389,10 @@ const generateClaudeDecisionAnalysis = async (userPrompt: string) => {
     },
     body: JSON.stringify({
       model,
-      max_tokens: Number(process.env.CLAUDE_MAX_TOKENS || 10000),
-      temperature: 0.45,
+      max_tokens: Number(process.env.CLAUDE_MAX_TOKENS || 7000),
+      temperature: 0.35,
       system:
-        "You are the analysis engine for a decision-making app. Return only one valid JSON object. Do not include markdown, commentary, code fences, or explanatory prose outside the JSON.",
+        "You are the analysis engine for a decision-making app. Return only one concise valid JSON object. Do not include markdown, commentary, code fences, or explanatory prose outside the JSON.",
       messages: [
         {
           role: "user",
@@ -396,7 +400,7 @@ const generateClaudeDecisionAnalysis = async (userPrompt: string) => {
         },
       ],
     }),
-  });
+  }).finally(() => clearTimeout(timeoutId));
 
   const json: any = await response.json().catch(() => ({}));
   if (!response.ok) {
