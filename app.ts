@@ -385,8 +385,8 @@ const generateClaudeDecisionAnalysis = async (userPrompt: string) => {
     },
     body: JSON.stringify({
       model,
-      max_tokens: Number(process.env.CLAUDE_MAX_TOKENS || 6000),
-      temperature: 0.7,
+      max_tokens: Number(process.env.CLAUDE_MAX_TOKENS || 10000),
+      temperature: 0.45,
       system:
         "You are the analysis engine for a decision-making app. Return only one valid JSON object. Do not include markdown, commentary, code fences, or explanatory prose outside the JSON.",
       messages: [
@@ -415,6 +415,12 @@ const generateClaudeDecisionAnalysis = async (userPrompt: string) => {
 
   if (!textOutput) {
     throw new Error("Received empty response from Claude model.");
+  }
+
+  if (json.stop_reason === "max_tokens") {
+    throw new Error(
+      "Claude response was truncated before it finished valid JSON. Increase CLAUDE_MAX_TOKENS or reduce the response size.",
+    );
   }
 
   return parseJsonObjectFromText(textOutput);
@@ -730,6 +736,140 @@ const normalizeDecisionAnalysis = ({
     },
     comparisons: normalizedComparisons,
     analysisProvider,
+  };
+};
+
+const buildLocalFallbackAnalysis = ({
+  decision,
+  normalizedOptions,
+  archetype,
+  personalSituation,
+  providerError,
+}: {
+  decision: string;
+  normalizedOptions: string[];
+  archetype: string;
+  personalSituation?: string;
+  providerError?: string;
+}) => {
+  const safeOptions = normalizedOptions.length
+    ? normalizedOptions
+    : ["Option A", "Option B"];
+  const profile =
+    ARCHETYPE_PROFILES[archetype as keyof typeof ARCHETYPE_PROFILES] ||
+    ARCHETYPE_PROFILES.rationalist;
+  const chosenOption =
+    archetype === "risk_minimizer"
+      ? safeOptions[0]
+      : safeOptions[Math.min(1, safeOptions.length - 1)];
+  const dimensions =
+    archetype === "bold_adventurer"
+      ? ["Growth potential", "Regret prevention", "Momentum"]
+      : archetype === "risk_minimizer"
+        ? ["Downside protection", "Predictability", "Recovery options"]
+        : archetype === "intuitive"
+          ? ["Energy fit", "Values alignment", "Emotional sustainability"]
+          : ["Expected value", "Execution friction", "Long-term payoff"];
+
+  return {
+    decision,
+    archetype,
+    options: safeOptions,
+    personalSituation,
+    verdict: {
+      chosenOption,
+      confidenceScore: 62,
+      mainArgument: `${chosenOption} has the clearest signal under the ${profile.name} lens based on the information available. This is a fallback analysis because the AI provider did not return a usable structured response.`,
+      whatToWatchOutFor:
+        providerError ||
+        "The main risk is acting before the most important unknowns are clarified.",
+      actionableNextSteps: [
+        "Name the one constraint that matters most.",
+        `Run a small test of ${chosenOption} before fully committing.`,
+        "Recheck the decision after new evidence arrives.",
+      ],
+    },
+    optionAnalyses: safeOptions.map((optionName, index) => {
+      const isChosen = optionName === chosenOption;
+      return {
+        optionName,
+        overallScore: isChosen ? 68 : Math.max(45, 62 - index * 4),
+        motto:
+          archetype === "bold_adventurer"
+            ? "Move toward meaningful growth"
+            : "Choose with grounded clarity",
+        pros: [
+          {
+            id: "pro1",
+            text: isChosen
+              ? "This option appears to create the strongest forward signal for the selected decision style."
+              : "This option remains viable and may fit some constraints well.",
+            impact: isChosen ? "High" : "Medium",
+            weight: isChosen ? 4 : 3,
+            category: archetype === "bold_adventurer" ? "Growth" : "Fit",
+          },
+          {
+            id: "pro2",
+            text: personalSituation
+              ? "It can be pressure-tested against the personal context you provided."
+              : "It can be evaluated with a small next step before committing.",
+            impact: "Medium",
+            weight: 3,
+            category: "Validation",
+          },
+        ],
+        cons: [
+          {
+            id: "con1",
+            text: "The evidence is incomplete because the AI provider response failed during structured analysis.",
+            impact: "Medium",
+            weight: 3,
+            category: "Uncertainty",
+          },
+          {
+            id: "con2",
+            text: "A wrong assumption about your priorities could change the recommendation.",
+            impact: "Medium",
+            weight: 3,
+            category: "Assumptions",
+          },
+        ],
+      };
+    }),
+    swot: {
+      strengths: [
+        "The decision has clear alternatives to compare.",
+        "The selected reasoning style gives the evaluation a consistent lens.",
+      ],
+      weaknesses: [
+        "The fallback result is less nuanced than a full model-generated analysis.",
+        "Some personal tradeoffs may need manual adjustment with the sliders.",
+      ],
+      opportunities: [
+        "A small experiment can quickly reveal which option feels real.",
+        "Clarifying one top constraint can sharpen the recommendation.",
+      ],
+      threats: [
+        "Provider instability may hide useful nuance.",
+        "Delayed action can preserve ambiguity longer than necessary.",
+      ],
+    },
+    comparisons: dimensions.map((dimension, dimensionIndex) => ({
+      dimension,
+      description: `How ${dimension.toLowerCase()} changes the strength of each option.`,
+      ratings: safeOptions.map((optionName, optionIndex) => ({
+        optionName,
+        score:
+          optionName === chosenOption
+            ? Math.max(7, 8 - dimensionIndex)
+            : Math.max(4, 6 - optionIndex - dimensionIndex),
+        justification:
+          optionName === chosenOption
+            ? `${optionName} currently has the stronger signal on ${dimension.toLowerCase()}.`
+            : `${optionName} may still work, but its signal is less clear on ${dimension.toLowerCase()}.`,
+      })),
+    })),
+    analysisProvider: "local-fallback",
   };
 };
 
@@ -1315,11 +1455,22 @@ app.post("/api/analyze-decision", async (req, res) => {
     res.json(normalizedAnalysis);
   } catch (error: any) {
     console.error("Decision-making analysis error:", error);
-    res.status(500).json({
-      error:
+    const normalizedOptions =
+      Array.isArray(req.body?.options) && req.body.options.length >= 2
+        ? req.body.options
+            .map((option: unknown) => toDisplayText(option).trim())
+            .filter(Boolean)
+        : ["Option A: Do it", "Option B: Do not do it"];
+    const fallbackAnalysis = buildLocalFallbackAnalysis({
+      decision: toDisplayText(req.body?.decision, "Untitled decision"),
+      normalizedOptions,
+      archetype: toDisplayText(req.body?.archetype, "rationalist"),
+      personalSituation: toDisplayText(req.body?.personalSituation),
+      providerError:
         error.message ||
-        "An error occurred while generating your decision breakdown. Check that your ANTHROPIC_API_KEY or GEMINI_API_KEY is configured.",
+        "The AI provider failed before returning a usable structured response.",
     });
+    res.json(fallbackAnalysis);
   }
 });
 
